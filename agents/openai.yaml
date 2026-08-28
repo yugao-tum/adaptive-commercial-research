@@ -1,0 +1,7 @@
+interface:
+  display_name: "自适应商业调研"
+  short_description: "多来源商业调研、覆盖管理、证据验证与批次合并"
+  default_prompt: "Use $adaptive-commercial-research to plan and execute a multi-source commercial research task with explicit coverage and evidence boundaries."
+
+policy:
+  allow_implicit_invocation: true
