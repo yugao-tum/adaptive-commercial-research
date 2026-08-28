@@ -116,3 +116,7 @@ python -m unittest discover -s tests -v
 ## Security
 
 Do not place tokens, cookies, authorization codes, private keys, or private source content in Skill files, fixtures, prompts, logs, or public reports. Keep credentials in environment variables, credential stores, or user-controlled sessions.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
