@@ -16,6 +16,19 @@ Route from the target field and page type to a capability. Concrete tools are re
 
 Run a small, diverse pilot before scaling. Compare routes by target-field yield, precision, elapsed time, cost, blocker rate, and reproducibility. Request count and page count are not progress metrics.
 
+For large collection runs, keep one lead adapter per source partition and one explicit fallback. Choose adapters by capability rather than popularity:
+
+| Route capability | Required behavior |
+|---|---|
+| search, sitemap, feed, or site map | return discoverable locators with pagination or cursor boundaries |
+| lightweight fetch | expose status, headers, final URL, raw payload, and retry guidance |
+| rendered or browser retrieval | preserve session and locale intentionally; detect challenge and empty-shell pages |
+| structured endpoint, API, or export | expose stable identifiers, pagination, limits, and schema version when available |
+| batch crawler | durable queue, per-host concurrency, deduplication, checkpoints, partial-result recovery, and dead-letter handling |
+| parser or extractor | versioned schema, raw-payload preservation, record-level validation, and reparse without refetch |
+
+Do not install several overlapping crawlers merely to increase theoretical coverage. Pilot the available routes, assign the best observed route to each partition, and retain another route only when it handles a distinct failure class.
+
 ## Runtime readiness
 
 Use four states: `ready`, `degraded`, `blocked`, `unknown`.
@@ -43,6 +56,8 @@ After installation or repair, repeat the real end-to-end acceptance request. Do 
 Retry only when the failure is plausibly transient or the next attempt changes a relevant parameter. Cap identical retries. After repeated failure, switch route, reduce scope, or return `blocked` with the exact boundary. Do not allow one blocked source to monopolize the run queue.
 
 Record route events with target field, source class, page type, adapter, attempt, result, blocker, yield, precision, cost, and elapsed time. Use this ledger to improve future routing rather than adding page-specific rules to the main prompt.
+
+When collection volume or failure recovery is material, use the attempt schema and adaptive queue protocol in [collection-throughput-and-recovery.md](collection-throughput-and-recovery.md).
 
 ## Security and access
 

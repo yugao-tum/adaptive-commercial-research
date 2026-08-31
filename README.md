@@ -11,6 +11,9 @@ It is designed for research about businesses, companies, brands, channels, produ
 - Separate coverage, evidence type, source strength, confidence, completeness, and currentness states.
 - A declared source universe with checked, no-confirmation, blocked, and unchecked boundaries.
 - Runtime acceptance tests for tools instead of treating installation as readiness.
+- A two-pass discovery and extraction pipeline that increases unique valid records without sending every target through the most expensive route.
+- Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.
+- A reproducible collection funnel covering discovery, fetch, parse, extraction, valid-record yield, duplicates, unresolved targets, and retry recovery.
 - Append-only JSONL observations with deterministic current views and retained conflicts.
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
 - A conclusion-first output contract with stable claim, source, gap, blocker, conflict, and action IDs.
@@ -49,6 +52,7 @@ adaptive-commercial-research/
 │   ├── research-contract.md
 │   ├── evidence-and-coverage.md
 │   ├── tool-routing-and-readiness.md
+│   ├── collection-throughput-and-recovery.md
 │   ├── data-contract-and-merge.md
 │   ├── parallel-research-protocol.md
 │   ├── skill-integrations.md
@@ -56,6 +60,7 @@ adaptive-commercial-research/
 ├── scripts/
 │   ├── init_research_run.py
 │   ├── merge_observations.py
+│   ├── summarize_collection_run.py
 │   └── validate_research_run.py
 └── tests/test_runtime.py
 ```
@@ -85,6 +90,14 @@ python scripts/merge_observations.py `
   --current-run-id RUN_ID
 ```
 
+Summarize collection quantity, stage success, route yield, unresolved targets, and retry recovery:
+
+```powershell
+python scripts/summarize_collection_run.py `
+  .\run-example `
+  --output .\run-example\collection_metrics.json
+```
+
 Validate the complete run package:
 
 ```powershell
@@ -106,6 +119,8 @@ The repository test suite checks:
 - conflict retention and deterministic selection
 - prevention of stale dynamic-field backfill
 - strict cross-file run validation
+- collection-attempt schema and retry-link validation
+- deterministic collection funnel and retry-recovery metrics
 
 Run it with:
 

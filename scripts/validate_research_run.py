@@ -32,11 +32,36 @@ FIELD_KINDS = {"static", "slowly_changing", "dynamic"}
 SOURCE_STRENGTHS = {"direct_primary", "official_secondary", "independent_secondary", "weak_signal", "unknown"}
 SOURCE_STATES = {"ready", "degraded", "blocked", "unknown"}
 ACCESS_CLASSES = {"public", "internal", "private", "restricted"}
+COLLECTION_STAGES = {"discover", "fetch", "render", "parse", "extract"}
+COLLECTION_STATUSES = {
+    "success",
+    "partial",
+    "empty",
+    "blocked",
+    "rate_limited",
+    "timeout",
+    "access_denied",
+    "challenge_blocked",
+    "transport_failed",
+    "parse_failed",
+    "invalid_target",
+    "skipped_duplicate",
+    "interrupted",
+}
+COLLECTION_NON_FAILURE_STATES = {"success", "partial", "skipped_duplicate"}
 
 
 def stable_hash(value: object) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def version_at_least(value: object, minimum: tuple[int, int, int]) -> bool:
+    try:
+        parts = tuple(int(part) for part in str(value).split("."))
+    except ValueError:
+        return False
+    return len(parts) == 3 and parts >= minimum
 
 
 def load_json(path: Path, errors: list[str]) -> dict[str, Any]:
@@ -128,6 +153,9 @@ def main() -> int:
         "run_manifest.json",
         errors,
     )
+    attempts_path = root / "collection_attempts.jsonl"
+    if version_at_least(manifest.get("schema_version"), (1, 1, 0)) and not attempts_path.is_file():
+        errors.append("missing required file for schema >= 1.1.0: collection_attempts.jsonl")
     for field in ("schema_version", "goal_id", "mode", "depth", "as_of"):
         if goal.get(field) != manifest.get(field):
             errors.append(f"goal_contract.json and run_manifest.json disagree on {field}")
@@ -145,6 +173,7 @@ def main() -> int:
             errors.append(f"{name}: goal_id mismatch")
 
     sources = load_jsonl(root / "sources.jsonl", errors)
+    collection_attempts = load_jsonl(attempts_path, errors) if attempts_path.is_file() else []
     coverage = load_jsonl(root / "coverage.jsonl", errors)
     observations = load_jsonl(root / "observations.jsonl", errors)
     tasks = load_jsonl(root / "tasks.jsonl", errors)
@@ -165,6 +194,63 @@ def main() -> int:
         if row.get("source_id") in source_ids:
             errors.append(f"{label}: duplicate source_id {row.get('source_id')!r}")
         source_ids.add(row.get("source_id"))
+
+    collection_attempt_ids: set[str] = set()
+    retry_links: list[tuple[str, str, int]] = []
+    for row in collection_attempts:
+        label = f"collection_attempts.jsonl:{row['_line']}"
+        require(
+            row,
+            {
+                "attempt_id",
+                "run_id",
+                "batch_id",
+                "target_id",
+                "stage",
+                "adapter",
+                "route_version",
+                "attempt_no",
+                "status",
+                "started_at",
+                "finished_at",
+            },
+            label,
+            errors,
+        )
+        attempt_id = row.get("attempt_id")
+        if not isinstance(attempt_id, str) or not attempt_id:
+            errors.append(f"{label}: attempt_id must be a non-empty string")
+        elif attempt_id in collection_attempt_ids:
+            errors.append(f"{label}: duplicate attempt_id {attempt_id!r}")
+        else:
+            collection_attempt_ids.add(attempt_id)
+        if row.get("run_id") != manifest.get("run_id"):
+            errors.append(f"{label}: run_id mismatch")
+        if row.get("stage") not in COLLECTION_STAGES:
+            errors.append(f"{label}: invalid stage {row.get('stage')!r}")
+        status = row.get("status")
+        if status not in COLLECTION_STATUSES:
+            errors.append(f"{label}: invalid status {status!r}")
+        if status in COLLECTION_STATUSES - COLLECTION_NON_FAILURE_STATES and not row.get("error_category"):
+            errors.append(f"{label}: failure status requires error_category")
+        attempt_no = row.get("attempt_no")
+        if not isinstance(attempt_no, int) or isinstance(attempt_no, bool) or attempt_no < 1:
+            errors.append(f"{label}: attempt_no must be a positive integer")
+        for field in ("valid_record_count", "new_record_count"):
+            value = row.get(field, 0)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        retry_of = row.get("retry_of_attempt_id")
+        if retry_of is not None:
+            retry_links.append((str(attempt_id), str(retry_of), row["_line"]))
+
+    for attempt_id, retry_of, line_no in retry_links:
+        if retry_of not in collection_attempt_ids:
+            errors.append(
+                f"collection_attempts.jsonl:{line_no}: retry_of_attempt_id {retry_of!r} does not exist"
+            )
+        if attempt_id == retry_of:
+            errors.append(f"collection_attempts.jsonl:{line_no}: attempt cannot retry itself")
 
     cell_attempt_ids: list[str] = []
     for row in coverage:
@@ -258,6 +344,8 @@ def main() -> int:
 
     if observations and not coverage:
         warnings.append("observations exist but coverage.jsonl is empty")
+    if observations and not collection_attempts:
+        warnings.append("observations exist but collection_attempts.jsonl is empty")
     if goal.get("depth") in {"standard", "exhaustive"} and not data_dictionary.get("unit_of_analysis"):
         warnings.append("data_dictionary.json has no unit_of_analysis")
     if goal.get("depth") in {"standard", "exhaustive"} and not coverage_plan.get("required_source_classes"):
@@ -274,6 +362,7 @@ def main() -> int:
 
     summary = {
         "sources": len(sources),
+        "collection_attempts": len(collection_attempts),
         "coverage_attempts": len(coverage),
         "observations": len(observations),
         "tasks": len(tasks),

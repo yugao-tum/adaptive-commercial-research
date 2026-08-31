@@ -82,6 +82,7 @@ class SkillStructureTests(unittest.TestCase):
             ROOT / "references" / "research-contract.md",
             ROOT / "references" / "evidence-and-coverage.md",
             ROOT / "references" / "tool-routing-and-readiness.md",
+            ROOT / "references" / "collection-throughput-and-recovery.md",
             ROOT / "references" / "data-contract-and-merge.md",
             ROOT / "references" / "parallel-research-protocol.md",
             ROOT / "references" / "skill-integrations.md",
@@ -133,7 +134,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "data_dictionary.json",
             {
-                "schema_version": "1.0.0",
+                "schema_version": "1.1.0",
                 "goal_id": "goal-test",
                 "unit_of_analysis": "object x field x market x period",
                 "key_fields": ["object_type", "object_id", "field", "market", "period"],
@@ -143,7 +144,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "coverage_plan.json",
             {
-                "schema_version": "1.0.0",
+                "schema_version": "1.1.0",
                 "goal_id": "goal-test",
                 "dimensions": ["object", "field", "market", "source_class"],
                 "required_source_classes": ["official", "independent"],
@@ -158,6 +159,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual("standard", initialized["depth"])
             self.assertTrue((run_dir / "data_dictionary.json").is_file())
             self.assertTrue((run_dir / "coverage_plan.json").is_file())
+            self.assertTrue((run_dir / "collection_attempts.jsonl").is_file())
 
             self.complete_contract_files(run_dir)
             valid = run_script("validate_research_run.py", run_dir, "--strict")
@@ -218,6 +220,85 @@ class RuntimeTests(unittest.TestCase):
             conflicts = [json.loads(line) for line in conflicts_ab.read_text(encoding="utf-8").splitlines()]
             self.assertEqual(2, sum(row["conflict_type"] == "competing_values" for row in conflicts))
             self.assertEqual(1, sum(row["conflict_type"] == "stale_only" for row in conflicts))
+
+    def test_collection_summary_tracks_funnel_and_retry_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir, _ = self.initialize(Path(temp))
+
+            def attempt(
+                attempt_id: str,
+                target_id: str,
+                stage: str,
+                status: str,
+                attempt_no: int = 1,
+                retry_of: str | None = None,
+                valid: int = 0,
+            ) -> dict[str, object]:
+                row: dict[str, object] = {
+                    "attempt_id": attempt_id,
+                    "run_id": "run-current",
+                    "batch_id": "batch-1",
+                    "target_id": target_id,
+                    "stage": stage,
+                    "adapter": "synthetic-adapter",
+                    "route_version": "1",
+                    "attempt_no": attempt_no,
+                    "status": status,
+                    "started_at": f"2026-08-01T00:00:{attempt_no:02d}Z",
+                    "finished_at": f"2026-08-01T00:01:{attempt_no:02d}Z",
+                    "valid_record_count": valid,
+                    "new_record_count": valid,
+                }
+                if status not in {"success", "partial", "skipped_duplicate"}:
+                    row["error_category"] = status
+                if retry_of:
+                    row["retry_of_attempt_id"] = retry_of
+                return row
+
+            attempts = [
+                attempt("A-01", "T-1", "discover", "success"),
+                attempt("A-02", "T-1", "fetch", "timeout"),
+                attempt("A-03", "T-1", "fetch", "success", 2, "A-02"),
+                attempt("A-04", "T-1", "parse", "success"),
+                attempt("A-05", "T-1", "extract", "success", valid=2),
+                attempt("A-06", "T-2", "discover", "success"),
+                attempt("A-07", "T-2", "fetch", "rate_limited"),
+                attempt("A-08", "T-3", "discover", "success"),
+                attempt("A-09", "T-3", "fetch", "success"),
+                attempt("A-10", "T-3", "parse", "success"),
+                attempt("A-11", "T-3", "extract", "success"),
+                attempt("A-12", "T-4", "discover", "success"),
+                attempt("A-13", "T-4", "fetch", "skipped_duplicate"),
+            ]
+            write_jsonl(run_dir / "collection_attempts.jsonl", attempts)
+            self.complete_contract_files(run_dir)
+            validated = run_script("validate_research_run.py", run_dir, "--strict")
+            self.assertEqual(13, json.loads(validated.stdout)["collection_attempts"])
+            write_jsonl(
+                run_dir / "observations.jsonl",
+                [
+                    {"observation_id": "O-1", "observation_key": "K-1"},
+                    {"observation_id": "O-2", "observation_key": "K-2"},
+                ],
+            )
+
+            result = run_script("summarize_collection_run.py", run_dir)
+            summary = json.loads(result.stdout)
+            self.assertEqual(13, summary["total_attempts"])
+            self.assertEqual(4, summary["unique_targets"])
+            self.assertEqual(0.5, summary["pipeline"]["fetch_success_rate"])
+            self.assertEqual(0.5, summary["pipeline"]["valid_target_rate"])
+            self.assertEqual(0.25, summary["pipeline"]["end_to_end_valid_rate"])
+            self.assertEqual(1, summary["pipeline"]["duplicate_targets"])
+            self.assertEqual(1, summary["pipeline"]["unresolved_targets"])
+            self.assertEqual(1.0, summary["recovery"]["retry_recovery_rate"])
+            self.assertEqual(2, summary["observations"]["unique_observation_keys"])
+
+            first = run_dir / "collection-metrics-a.json"
+            second = run_dir / "collection-metrics-b.json"
+            run_script("summarize_collection_run.py", run_dir, "--output", first)
+            run_script("summarize_collection_run.py", run_dir, "--output", second)
+            self.assertEqual(digest(first), digest(second))
 
 
 if __name__ == "__main__":

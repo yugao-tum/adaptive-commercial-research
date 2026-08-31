@@ -12,9 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 JSONL_FILES = (
     "sources.jsonl",
+    "collection_attempts.jsonl",
     "coverage.jsonl",
     "observations.jsonl",
     "tasks.jsonl",
