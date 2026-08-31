@@ -11,12 +11,14 @@ It is designed for research about businesses, companies, brands, channels, produ
 - Separate coverage, evidence type, source strength, confidence, completeness, and currentness states.
 - A declared source universe with checked, no-confirmation, blocked, and unchecked boundaries.
 - Runtime acceptance tests for tools instead of treating installation as readiness.
+- Optional project-local source and platform playbooks that remain historical priors until a current pilot validates them.
 - A two-pass discovery and extraction pipeline that increases unique valid records without sending every target through the most expensive route.
 - Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.
 - A reproducible collection funnel covering discovery, fetch, parse, extraction, valid-record yield, duplicates, unresolved targets, and retry recovery.
 - Append-only JSONL observations with deterministic current views and retained conflicts.
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
 - A conclusion-first output contract with stable claim, source, gap, blocker, conflict, and action IDs.
+- A learning-disposition gate that keeps one-off failures in run evidence, platform knowledge in project playbooks, deterministic defects in code/tests, and only cross-source invariants in the Skill.
 
 ## Install
 

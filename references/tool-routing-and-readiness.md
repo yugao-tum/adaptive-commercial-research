@@ -45,6 +45,47 @@ Before declaring a route ready in the current run, verify the smallest relevant 
 
 A version command, successful installer, visible GUI, configured connector, or historical success is not runtime acceptance. Store `last_verified_at`, target type, and actual result state.
 
+## Project-local route knowledge
+
+A project may maintain a source- or platform-specific playbook. It is a long-lived operational prior, not a second copy of this Skill and not evidence that a route is ready now.
+
+When a project playbook is named by project instructions or run configuration:
+
+1. Load only the section for the current source or platform, market, and page type; do not load an entire catalog when one adapter is in scope.
+2. Keep the playbook path outside this portable Skill. Record the consulted `route_id`, `route_version`, and playbook revision in the run manifest or collection attempts.
+3. Re-run the smallest relevant readiness pilot before scaling. A historical success, route pattern, field coverage table, or past blocker is not current acceptance.
+4. Preserve the old record when a route changes. Add a new route version and explicitly relate it to the route it supersedes or diagnoses.
+
+Keep long-lived knowledge state separate from current runtime state:
+
+| Knowledge state | Meaning |
+|---|---|
+| `candidate` | plausible route or optimization not yet supported by a diverse pilot |
+| `historical_prior` | executed or observed previously, but not accepted in the current environment |
+| `validated` | passed the project's current evidence gate for the stated market, page type, and fields |
+| `superseded` | retained for provenance or fallback analysis after a better route replaced it |
+| `retired` | known to be invalid, unsafe, or outside the maintained scope |
+
+Each maintained route should identify: `route_id`, route version, source or platform, market and locale, delivery or session boundary when material, page type and stage, adapter and material configuration, knowledge state, `last_verified_at`, pilot scope, target-field yield and precision, blocker fingerprints, provenance run/attempt IDs, and any superseded route.
+
+Route changes must preserve business semantics. Changing country, locale, currency, delivery location, account, session, or login state creates a different evidence context and must be recorded as a separate route event. A route with different semantics may diagnose transport or blocking behavior, but its values must not populate the original current view.
+
+Use an isolated browser context by default. Attach an existing browser profile, CDP session, or user login only when it is necessary for the agreed source, the access is authorized, and the resulting session boundary is recorded.
+
+## Learning disposition and promotion
+
+Do not turn every failed page or successful workaround into permanent guidance. At a stable checkpoint or run close, classify material learning by its correct owner:
+
+| Finding | Correct destination |
+|---|---|
+| transient outage, one-off page anomaly, or unconfirmed hypothesis | append-only run attempts only |
+| repeatable source/platform route, blocker signature, field semantic, or stopping rule | project-local playbook with route version and provenance |
+| deterministic parsing, normalization, merge, or validation defect | code plus a regression test; the playbook may record the operational effect |
+| cross-source decision rule or safety/correctness invariant | Skill-maintenance candidate |
+| changed objective, market, scope, or deliverable | goal contract or explicit user decision |
+
+An ordinary research run may update a project-local playbook when project instructions authorize maintenance and the finding passed the stated evidence gate. It must not edit the installed Skill. Promote a Skill candidate only in an explicit Skill-maintenance task, using [research-contract.md](research-contract.md) to confirm that the failure recurs, changes a decision, is expensive if repeated, and cannot be enforced more reliably by data or code. Supersede the old rule and add a meaningful regression test when deterministic behavior changes.
+
 ## Installation boundary
 
 This Skill owns readiness checks and routing, not unsolicited installation or environment repair. If a required capability is absent, report the gap and use an available fallback. Install, authenticate, or modify system configuration only when the user explicitly requests it or when a selected dedicated setup Skill is authorized to do so.
@@ -55,12 +96,12 @@ After installation or repair, repeat the real end-to-end acceptance request. Do 
 
 Retry only when the failure is plausibly transient or the next attempt changes a relevant parameter. Cap identical retries. After repeated failure, switch route, reduce scope, or return `blocked` with the exact boundary. Do not allow one blocked source to monopolize the run queue.
 
-Record route events with target field, source class, page type, adapter, attempt, result, blocker, yield, precision, cost, and elapsed time. Use this ledger to improve future routing rather than adding page-specific rules to the main prompt.
+Record route events with target field, source class, page type, adapter, route version, evidence context, attempt, result, blocker, yield, precision, cost, and elapsed time. Use the disposition rules above to improve project routing without adding page-specific rules to the main Skill.
 
 When collection volume or failure recovery is material, use the attempt schema and adaptive queue protocol in [collection-throughput-and-recovery.md](collection-throughput-and-recovery.md).
 
 ## Security and access
 
-Keep credentials in environment variables, credential stores, or user-controlled sessions. Never place tokens, cookies, authorization codes, or private keys in prompts, logs, reports, fixtures, or Skill files. Use the minimum read permission needed and do not convert read-only research into external writes without separate authorization.
+Keep credentials in environment variables, credential stores, or user-controlled sessions. Never place tokens, cookies, authorization codes, or private keys in prompts, logs, reports, fixtures, Skill files, or project playbooks. Use the minimum read permission needed and do not convert read-only research into external writes without separate authorization.
 
 For optional installed Skill routing, read [skill-integrations.md](skill-integrations.md).

@@ -34,21 +34,24 @@ Select the narrowest useful mode:
 9. When repeated additions make the deliverable hard to navigate, preserve the source artifact and produce a clean integrated result instead of appending another patch.
 10. Separate cheap discovery from expensive extraction. Canonicalize and deduplicate targets before rendering, browser interaction, OCR, or paid retrieval.
 11. Log every target-stage attempt append-only. Retry only after classifying the failure and changing a relevant condition; retain failed attempts when recovery succeeds.
+12. Preserve evidence semantics across route changes. Market, locale, currency, delivery context, identity scope, and session or login state must not change silently; diagnostic fallbacks with different semantics cannot populate the current evidence layer.
 
 ## Run the research
 
 1. Create a compact goal contract, data dictionary, source universe, and initial coverage matrix.
 2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale.
-3. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, stage success rates, precision, time, cost, duplicates, and blockers.
-4. Route by target field and source capability. Expand, switch, or stop a route from observed net yield, not advertised features, successful HTTP responses, or request counts.
-5. Store sources, collection attempts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Use the scripts in `scripts/` when multiple batches or agents are involved.
-6. Apply quality gates before synthesis: coverage visibility, claim-to-source traceability, key stability, conflict retention, currentness, and output navigation.
-7. Deliver the answer using [output-contract.md](references/output-contract.md). Do not return a process diary or an unstructured bullet dump.
+3. If project instructions name a local source or platform playbook, load only the relevant target, market, and page-type section. Record the referenced route version and treat every historical route as a prior, not current readiness.
+4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, stage success rates, precision, time, cost, duplicates, and blockers.
+5. Route by target field and source capability. Expand, switch, or stop a route from observed net yield, not advertised features, successful HTTP responses, or request counts.
+6. Store sources, collection attempts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Use the scripts in `scripts/` when multiple batches or agents are involved.
+7. Classify material operational learning as run-only evidence, a project-playbook update, a deterministic code/test fix, or a Skill-maintenance candidate. Update an authorized project-local playbook before closeout when the evidence gate is met; do not self-modify an installed Skill during an ordinary research run.
+8. Apply quality gates before synthesis: coverage visibility, claim-to-source traceability, key stability, conflict retention, currentness, and output navigation.
+9. Deliver the answer using [output-contract.md](references/output-contract.md). Do not return a process diary or an unstructured bullet dump.
 
 ## Load details only when needed
 
 - For source classes, evidence strength, coverage states, object separation, and completeness tests, read [evidence-and-coverage.md](references/evidence-and-coverage.md).
-- For retrieval routes, readiness checks, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
+- For retrieval routes, readiness checks, project-local playbooks, route lifecycle, learning promotion, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
 - For high-volume collection, discovery-to-extraction funnels, adaptive batches, failure recovery, and success metrics, read [collection-throughput-and-recovery.md](references/collection-throughput-and-recovery.md).
 - For canonical JSONL records, stable keys, deterministic merge rules, and batch invariance, read [data-contract-and-merge.md](references/data-contract-and-merge.md).
 - For independent work lanes, ownership leases, result packages, single-writer rules, and recovery from blocked tasks, read [parallel-research-protocol.md](references/parallel-research-protocol.md) only when parallel work is justified.
