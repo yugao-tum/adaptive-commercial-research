@@ -2,6 +2,8 @@
 
 These are conditional routes, not permanent co-owners. Before invoking another Skill, confirm it is available in the current environment and read its complete `SKILL.md`. If unavailable, continue with the closest safe capability and state the limitation. Do not copy another Skill's instructions into this Skill.
 
+Apply the external-executor dispatch gate in [tool-routing-and-readiness.md](tool-routing-and-readiness.md). Once a support Skill is selected for a material capability gap, invoke it on a bounded real task and record its result; merely reading its instructions or listing it as an option does not count as use. When it is not selected, retain the explicit reason instead of repeatedly proposing the same unused integration.
+
 ## Routing and precedence
 
 | Skill | Invoke when | Relationship to this Skill |

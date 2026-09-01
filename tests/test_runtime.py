@@ -167,11 +167,31 @@ class RuntimeTests(unittest.TestCase):
         )
         return run_dir, json.loads(result.stdout)
 
+    def set_coordination(
+        self,
+        run_dir: Path,
+        lane_count: int = 1,
+        child_decision: str = "single_lane",
+        child_reason: str | None = "Only one independent lane is ready",
+        external_decisions: list[dict[str, object]] | None = None,
+    ) -> dict[str, object]:
+        manifest_path = run_dir / "run_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["coordination"] = {
+            "assessed": True,
+            "independent_lane_count": lane_count,
+            "child_agent_decision": child_decision,
+            "child_agent_reason": child_reason,
+            "external_executor_decisions": external_decisions or [],
+        }
+        write_json(manifest_path, manifest)
+        return manifest
+
     def complete_contract_files(self, run_dir: Path) -> None:
         write_json(
             run_dir / "data_dictionary.json",
             {
-                "schema_version": "1.3.0",
+                "schema_version": "1.4.0",
                 "goal_id": "goal-test",
                 "unit_of_analysis": "object x field x market x period",
                 "key_fields": ["object_type", "object_id", "field", "market", "period"],
@@ -181,7 +201,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "coverage_plan.json",
             {
-                "schema_version": "1.3.0",
+                "schema_version": "1.4.0",
                 "goal_id": "goal-test",
                 "dimensions": ["object", "field", "market", "source_class"],
                 "required_source_classes": ["official", "independent"],
@@ -190,10 +210,12 @@ class RuntimeTests(unittest.TestCase):
                 "completion_rule": "Every required cell has a terminal state",
             },
         )
+        self.set_coordination(run_dir)
 
     def test_initialization_and_goal_drift_detection(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             run_dir, initialized = self.initialize(Path(temp))
+            self.assertEqual("1.4.0", initialized["schema_version"])
             self.assertEqual("standard", initialized["depth"])
             self.assertTrue((run_dir / "data_dictionary.json").is_file())
             self.assertTrue((run_dir / "coverage_plan.json").is_file())
@@ -240,7 +262,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "data_dictionary.json",
                 {
-                    "schema_version": "1.3.0",
+                    "schema_version": "1.4.0",
                     "goal_id": "goal-fields",
                     "unit_of_analysis": "listing x field x market x observation time",
                     "key_fields": ["listing_id", "field", "market", "observed_at"],
@@ -250,7 +272,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "coverage_plan.json",
                 {
-                    "schema_version": "1.3.0",
+                    "schema_version": "1.4.0",
                     "goal_id": "goal-fields",
                     "dimensions": ["listing", "field", "market"],
                     "required_source_classes": ["official"],
@@ -270,6 +292,7 @@ class RuntimeTests(unittest.TestCase):
             contract["extractor_output_fields"] = ["price", "seller"]
             contract["acceptance_fields"] = ["price"]
             write_json(contract_path, contract)
+            self.set_coordination(run_dir)
             valid = run_script("validate_research_run.py", run_dir, "--strict")
             self.assertEqual(0, json.loads(valid.stdout)["errors"])
 
@@ -393,6 +416,41 @@ class RuntimeTests(unittest.TestCase):
             )
             write_jsonl(run_dir / "collection_attempts.jsonl", attempts)
             self.complete_contract_files(run_dir)
+            manifest = self.set_coordination(
+                run_dir,
+                external_decisions=[
+                    {
+                        "executor_id": "synthetic-cli",
+                        "capability_gap": "bounded external discovery",
+                        "decision": "selected",
+                        "reason": "real target pilot passed",
+                        "pilot_attempt_id": "A-01",
+                    }
+                ],
+            )
+            write_jsonl(
+                run_dir / "tasks.jsonl",
+                [
+                    {
+                        "task_id": "TASK-CLI-1",
+                        "goal_id": "goal-test",
+                        "input_snapshot": manifest["input_snapshot"],
+                        "partition_key": "external:discovery",
+                        "owner": "synthetic-cli",
+                        "status": "completed",
+                        "attempt": 1,
+                        "runner_class": "external_cli",
+                        "executor_id": "synthetic-cli",
+                        "dispatch_reason": "distinctive discovery capability passed pilot",
+                        "expected_output_schema": "target records JSONL",
+                        "acceptance_metric": "valid target yield",
+                        "escalation_condition": "identity precision below threshold",
+                        "allowed_side_effects": [],
+                        "resource_lease_keys": [],
+                        "readiness_state": "ready",
+                    }
+                ],
+            )
             validated = run_script("validate_research_run.py", run_dir, "--strict")
             self.assertEqual(13, json.loads(validated.stdout)["collection_attempts"])
             attempts[0]["provider_run_id"] = 123
@@ -426,12 +484,70 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(1, len(summary["batches_marginal_yield"]))
             self.assertIn("synthetic-route", summary["routes"])
             self.assertIn("local-test", summary["executors"])
+            self.assertEqual(1, summary["coordination"]["tasks_by_runner_class"]["external_cli"])
 
             first = run_dir / "collection-metrics-a.json"
             second = run_dir / "collection-metrics-b.json"
             run_script("summarize_collection_run.py", run_dir, "--output", first)
             run_script("summarize_collection_run.py", run_dir, "--output", second)
             self.assertEqual(digest(first), digest(second))
+
+    def test_delegation_contract_requires_real_child_work_and_exclusive_resource_leases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir, _ = self.initialize(Path(temp))
+            self.complete_contract_files(run_dir)
+            manifest = self.set_coordination(
+                run_dir,
+                lane_count=2,
+                child_decision="delegated",
+                child_reason=None,
+            )
+
+            def task(
+                task_id: str,
+                runner_class: str,
+                executor_id: str,
+                partition_key: str,
+                resource_key: str,
+            ) -> dict[str, object]:
+                row: dict[str, object] = {
+                    "task_id": task_id,
+                    "goal_id": "goal-test",
+                    "input_snapshot": manifest["input_snapshot"],
+                    "partition_key": partition_key,
+                    "owner": executor_id,
+                    "status": "leased",
+                    "attempt": 1,
+                    "runner_class": runner_class,
+                    "executor_id": executor_id,
+                    "dispatch_reason": "independent bounded lane",
+                    "expected_output_schema": "worker result JSONL",
+                    "acceptance_metric": "accepted field yield",
+                    "escalation_condition": "unresolved identity or route failure",
+                    "allowed_side_effects": [],
+                    "resource_lease_keys": [resource_key],
+                }
+                if runner_class == "child_agent":
+                    row["model_tier"] = "balanced"
+                    row["reasoning_tier"] = "medium"
+                return row
+
+            lead_only = [task("TASK-CODE", "deterministic_code", "local-code", "partition:code", "output:shared")]
+            write_jsonl(run_dir / "tasks.jsonl", lead_only)
+            missing_child = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, missing_child.returncode)
+            self.assertIn("no child_agent task", missing_child.stdout)
+
+            child = task("TASK-AGENT", "child_agent", "worker-balanced", "partition:evidence", "output:shared")
+            write_jsonl(run_dir / "tasks.jsonl", [lead_only[0], child])
+            conflicted = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, conflicted.returncode)
+            self.assertIn("resource_lease_key", conflicted.stdout)
+
+            child["resource_lease_keys"] = ["output:worker-package"]
+            write_jsonl(run_dir / "tasks.jsonl", [lead_only[0], child])
+            valid = run_script("validate_research_run.py", run_dir, "--strict")
+            self.assertEqual(2, json.loads(valid.stdout)["tasks"])
 
     def test_planner_raw_cache_and_pilot_gate_form_a_closed_loop(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -465,7 +581,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "data_dictionary.json",
                 {
-                    "schema_version": "1.3.0",
+                    "schema_version": "1.4.0",
                     "goal_id": "goal-plan",
                     "unit_of_analysis": "listing x field x market x observation time",
                     "key_fields": ["listing_id", "field", "market", "observed_at"],
@@ -475,7 +591,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "coverage_plan.json",
                 {
-                    "schema_version": "1.3.0",
+                    "schema_version": "1.4.0",
                     "goal_id": "goal-plan",
                     "dimensions": ["target", "field", "market"],
                     "required_source_classes": ["official"],
@@ -489,6 +605,7 @@ class RuntimeTests(unittest.TestCase):
             field_contract["extractor_output_fields"] = ["price", "seller"]
             field_contract["acceptance_fields"] = ["price"]
             write_json(field_contract_path, field_contract)
+            self.set_coordination(run_dir)
             spec_path = root / "plan.json"
             write_json(
                 spec_path,

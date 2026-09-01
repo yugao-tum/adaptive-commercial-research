@@ -24,6 +24,7 @@ It is designed for research about businesses, companies, brands, channels, produ
 - One-pass extraction of independently evidenced in-scope fields from expensive payloads, with reparse-before-refetch recovery.
 - Append-only JSONL observations with deterministic current views and retained conflicts.
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
+- A mandatory dispatch assessment that distinguishes child agents, external CLIs, native tools, deterministic code, and request concurrency, with explicit non-dispatch reasons.
 - Role-based agent, model, quota, and concurrency tiering driven by accepted yield rather than model prestige.
 - A conclusion-first output contract with stable claim, source, gap, blocker, conflict, and action IDs.
 - A learning-disposition gate that keeps one-off failures in run evidence, platform knowledge in project playbooks, deterministic defects in code/tests, and only cross-source invariants in the Skill.
@@ -106,6 +107,8 @@ Schema 1.3 adds `target_queue.jsonl` and `raw_artifacts.jsonl`. Use a project-lo
 ```powershell
 python scripts/plan_collection.py .\run-example --spec .\collection-plan.json
 ```
+
+Schema 1.4 adds an execution-routing contract. Before broad `standard` or `exhaustive` work, complete `run_manifest.json.coordination`; selected child agents and external CLIs must resolve to real `tasks.jsonl` assignments, while non-selection retains a concrete reason.
 
 Validate a completed pilot partition before scale-up:
 

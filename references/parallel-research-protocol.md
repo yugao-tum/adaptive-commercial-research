@@ -6,6 +6,30 @@ Load this reference only when the work has at least two independent evidence lan
 
 Keep the work single-threaded when scope or identifiers are unresolved, later steps depend tightly on earlier results, one focused Skill can answer the request, the task is a narrow follow-up, or agents would need to edit the same artifact.
 
+## Separate runner classes before dispatch
+
+Parallel requests are not the same as parallel reasoning. Assign every planned lane one runner class before broad execution:
+
+| Runner class | Appropriate work | Does not count as |
+|---|---|---|
+| `lead` | goal, schema, routing, conflicts, merge approval, and final conclusion | independent review |
+| `child_agent` | a mutually independent evidence lane, semantic exception set, route diagnosis, or independent QA | bulk request concurrency |
+| `external_cli` | a distinctive retrieval, analysis, or runtime capability that passed a real pilot | readiness merely because it is installed |
+| `native_tool` | bounded search, browser, connector, or application calls controlled by the lead or worker | a separate agent unless it has independent ownership and a result package |
+| `deterministic_code` | queue execution, normalization, parsing, deduplication, merge, counting, and invariant checks | semantic judgment |
+
+Do not describe multiple browser tabs, server threads, shell processes, asynchronous requests, or model calls owned by the same controller as child-agent delegation. They may improve throughput, but they share one reasoning owner.
+
+## Mandatory dispatch assessment
+
+For every `standard` or `exhaustive` run, complete `run_manifest.json.coordination` before broad execution. Count only lanes whose scope, partition key, input snapshot, output schema, acceptance metric, and resource needs are already stable.
+
+When at least two mutually independent lanes are ready and delegation is available and authorized, delegate at least one lane to a child agent and assign distinct owners to other ready lanes up to safe concurrency. Explicit user permission removes the authorization barrier; once the independence and benefit gates also pass, do not leave delegation as a merely optional suggestion.
+
+If delegation does not occur, record one concrete decision: `single_lane`, `coordination_cost`, `unavailable`, `unauthorized`, or `unsafe_shared_state`, plus the reason. A lead-only run with two or more declared independent lanes must not pass strict validation without that exception. For exhaustive or high-impact work, use a separate independent QA lane when available and authorized; otherwise record the same exception rather than treating self-review as independent.
+
+External executors use a parallel decision gate in [tool-routing-and-readiness.md](tool-routing-and-readiness.md). A selected CLI or helper Skill must receive a real task and pilot attempt; reading its documentation, checking its version, or mentioning it in the plan is not dispatch.
+
 ## Ownership model
 
 | Role | Owns | Must not do |
@@ -32,6 +56,16 @@ Do not assign every lane the strongest model, highest reasoning level, or maximu
 
 Alternative quotas or external agents may handle routine work only after a current-run real-target pilot proves the required tools, output schema, privacy boundary, and accuracy. Available credit or speed is not evidence of capability. Record the executor class, material model or route version, cost, latency, and accepted yield so later allocation is evidence-based.
 
+Map the models available in the current environment to portable capability tiers instead of hard-coding provider-specific names:
+
+| Model tier | Default work | Reasoning tier |
+|---|---|---|
+| `strong_reasoning` | lead control, ambiguous semantics, route recovery, conflict resolution, and independent QA | `high`, reduced only when the pilot supports it |
+| `balanced` | bounded evidence lanes, parser review, and routine semantic extraction | `medium` |
+| `low_cost` | pilot-validated repetitive discovery, classification, or formatting | `low` |
+
+Record the selected `model_tier`, reasoning tier, and exact executor ID in each child-agent task. Do not let every child silently inherit the lead's model. If a tier is unavailable, use the closest available tier, record the substitution in `dispatch_reason`, and preserve the same acceptance gate.
+
 Start with a representative sample for each proposed tier. Promote routine lanes only when their accepted field yield and precision are adequate; escalate exceptions rather than the whole queue. Downgrade or stop a tier when retry recovery or net-new yield is poor.
 
 ## Partition rules
@@ -45,7 +79,7 @@ Partitions must be mutually exclusive and collectively traceable. Split by one o
 - target field group
 - workflow stage after prerequisites are complete
 
-Do not partition by vague instructions such as “research broadly.” Each task gets a unique `task_id`, `goal_id`, immutable input snapshot, partition key, owner lease, expected output schema, stopping condition, and allowed side effects.
+Do not partition by vague instructions such as “research broadly.” Each task gets a unique `task_id`, `goal_id`, immutable input snapshot, partition key, owner lease, runner class, exact executor ID, dispatch reason, expected output schema, acceptance metric, escalation condition, allowed side effects, and resource lease keys.
 
 Only one active lease may exist for a partition key. Expired or blocked work returns to the queue with its checkpoint; it is not silently duplicated.
 

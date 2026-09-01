@@ -38,10 +38,11 @@ Select the narrowest useful mode:
 13. Before scaling, reconcile required, optional, and excluded fields across the goal contract, data dictionary, extractor output, merge layer, and acceptance metrics. A terminal target is not evidence that every required field is complete.
 14. When an expensive retrieval already exposes several in-scope fields, extract every explicit field supported by that payload in the same pass, but create independent observations and never infer one field from another. Reparse preserved evidence before refetching.
 15. Use the least expensive currently validated capability that can meet the task's evidence and reasoning requirements. Reserve stronger agents for scope, ambiguous semantics, route recovery, conflicts, and QA; use deterministic code for deterministic transformations.
+16. Distinguish child-agent delegation, external CLI or helper-Skill dispatch, native tool calls, deterministic code, and request concurrency. For `standard` or `exhaustive` work, assess these runner classes before broad execution: when at least two independent lanes are ready, delegate a child lane when available and authorized, or record the concrete exception. Threads and concurrent requests do not count as agent delegation; merely listing an installed CLI does not count as dispatch.
 
 ## Run the research
 
-1. Create a compact goal contract, field contract, data dictionary, and declared source universe. For matrix-scale collection, use the planner to materialize stable targets, target-field cells, and partitions before retrieval.
+1. Create a compact goal contract, field contract, data dictionary, and declared source universe. For matrix-scale collection, use the planner to materialize stable targets, target-field cells, and partitions before retrieval. For `standard` or `exhaustive` work, also complete the coordination and external-executor decisions in the run manifest before broad retrieval.
 2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale. Reconcile the field contract with the extractor and acceptance layer before the pilot.
 3. If project instructions name a local source or platform playbook, load only the relevant target, market, and page-type section. Record the referenced route version and treat every historical route as a prior, not current readiness.
 4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, required-field yield, stage success rates, precision, time, cost, duplicates, and blockers. Validate real target-field outcomes before expanding the queue.
@@ -57,7 +58,7 @@ Select the narrowest useful mode:
 - For retrieval routes, readiness checks, managed or black-box collector evaluation, project-local playbooks, route lifecycle, learning promotion, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
 - For high-volume collection, discovery-to-extraction funnels, adaptive batches, failure recovery, and success metrics, read [collection-throughput-and-recovery.md](references/collection-throughput-and-recovery.md).
 - For canonical JSONL records, stable keys, deterministic merge rules, and batch invariance, read [data-contract-and-merge.md](references/data-contract-and-merge.md).
-- For independent work lanes, ownership leases, result packages, single-writer rules, and recovery from blocked tasks, read [parallel-research-protocol.md](references/parallel-research-protocol.md) only when parallel work is justified.
+- For child-agent triggers, runner-class separation, model capability tiers, ownership leases, result packages, single-writer rules, and recovery from blocked tasks, read [parallel-research-protocol.md](references/parallel-research-protocol.md) when multiple lanes, external executors, independent QA, or shared resources are in scope.
 - For optional routing to other installed skills, read [skill-integrations.md](references/skill-integrations.md) and load only the selected skill's full instructions.
 - For long or stakeholder-facing results, read [output-contract.md](references/output-contract.md).
 

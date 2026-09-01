@@ -28,6 +28,27 @@ REQUIRED_FILES = (
 COVERAGE_STATES = {"checked_hit", "checked_no_confirmation", "blocked", "unchecked"}
 TASK_STATES = {"pending", "leased", "completed", "blocked", "failed", "cancelled"}
 ACTIVE_TASK_STATES = {"pending", "leased"}
+RUNNER_CLASSES = {"lead", "child_agent", "external_cli", "native_tool", "deterministic_code"}
+MODEL_TIERS = {"strong_reasoning", "balanced", "low_cost"}
+REASONING_TIERS = {"low", "medium", "high"}
+CHILD_AGENT_DECISIONS = {
+    "unassessed",
+    "delegated",
+    "single_lane",
+    "coordination_cost",
+    "unavailable",
+    "unauthorized",
+    "unsafe_shared_state",
+}
+EXTERNAL_EXECUTOR_DECISIONS = {
+    "selected",
+    "duplicate_capability",
+    "unavailable",
+    "auth_blocked",
+    "cost_blocked",
+    "failed_pilot",
+    "not_needed",
+}
 FIELD_KINDS = {"static", "slowly_changing", "dynamic"}
 SOURCE_STRENGTHS = {"direct_primary", "official_secondary", "independent_secondary", "weak_signal", "unknown"}
 SOURCE_STATES = {"ready", "degraded", "blocked", "unknown"}
@@ -196,6 +217,7 @@ def main() -> int:
     if version_at_least(manifest.get("schema_version"), (1, 1, 0)) and not attempts_path.is_file():
         errors.append("missing required file for schema >= 1.1.0: collection_attempts.jsonl")
     requires_control_plane = version_at_least(manifest.get("schema_version"), (1, 3, 0))
+    requires_execution_routing = version_at_least(manifest.get("schema_version"), (1, 4, 0))
     for name in ("target_queue.jsonl", "raw_artifacts.jsonl"):
         if requires_control_plane and not (root / name).is_file():
             errors.append(f"missing required file for schema >= 1.3.0: {name}")
@@ -206,6 +228,75 @@ def main() -> int:
         errors.append(f"invalid depth: {goal.get('depth')!r}")
     if manifest.get("input_snapshot") and stable_hash(goal) != manifest.get("input_snapshot"):
         errors.append("goal_contract.json no longer matches run_manifest.json input_snapshot")
+
+    coordination: dict[str, Any] = {}
+    selected_external_attempts: list[tuple[str, str]] = []
+    selected_external_ids: set[str] = set()
+    if requires_execution_routing:
+        if not isinstance(manifest.get("coordination"), dict):
+            errors.append("run_manifest.json.coordination must be an object for schema >= 1.4.0")
+        else:
+            coordination = manifest["coordination"]
+            require(
+                coordination,
+                {
+                    "assessed",
+                    "independent_lane_count",
+                    "child_agent_decision",
+                    "child_agent_reason",
+                    "external_executor_decisions",
+                },
+                "run_manifest.json.coordination",
+                errors,
+            )
+            assessed = coordination.get("assessed")
+            if not isinstance(assessed, bool):
+                errors.append("run_manifest.json.coordination.assessed must be a boolean")
+            elif not assessed:
+                warnings.append("coordination and executor routing have not been assessed")
+            lane_count = coordination.get("independent_lane_count")
+            if not isinstance(lane_count, int) or isinstance(lane_count, bool) or lane_count < 0:
+                errors.append("run_manifest.json.coordination.independent_lane_count must be a non-negative integer")
+            child_decision = coordination.get("child_agent_decision")
+            if child_decision not in CHILD_AGENT_DECISIONS:
+                errors.append(f"run_manifest.json.coordination has invalid child_agent_decision {child_decision!r}")
+            child_reason = coordination.get("child_agent_reason")
+            if (
+                child_decision != "delegated"
+                and assessed
+                and isinstance(lane_count, int)
+                and not isinstance(lane_count, bool)
+                and lane_count >= 2
+            ):
+                if child_decision == "single_lane":
+                    errors.append("coordination declares at least two independent lanes but child_agent_decision is single_lane")
+                if not isinstance(child_reason, str) or not child_reason.strip():
+                    errors.append("non-delegation with multiple independent lanes requires child_agent_reason")
+            decisions = as_list(
+                coordination.get("external_executor_decisions"),
+                "run_manifest.json.coordination.external_executor_decisions",
+                errors,
+            )
+            for index, decision in enumerate(decisions):
+                label = f"run_manifest.json.coordination.external_executor_decisions[{index}]"
+                if not isinstance(decision, dict):
+                    errors.append(f"{label}: expected an object")
+                    continue
+                require(decision, {"executor_id", "capability_gap", "decision", "reason"}, label, errors)
+                for field in ("executor_id", "capability_gap", "reason"):
+                    if not isinstance(decision.get(field), str) or not decision.get(field):
+                        errors.append(f"{label}.{field} must be a non-empty string")
+                state = decision.get("decision")
+                if state not in EXTERNAL_EXECUTOR_DECISIONS:
+                    errors.append(f"{label}: invalid decision {state!r}")
+                if state in {"selected", "failed_pilot"}:
+                    attempt_id = decision.get("pilot_attempt_id")
+                    if not isinstance(attempt_id, str) or not attempt_id:
+                        errors.append(f"{label}: {state} requires pilot_attempt_id")
+                    else:
+                        selected_external_attempts.append((str(decision.get("executor_id")), attempt_id))
+                if state == "selected" and isinstance(decision.get("executor_id"), str):
+                    selected_external_ids.add(decision["executor_id"])
 
     require(data_dictionary, {"schema_version", "goal_id", "unit_of_analysis", "key_fields", "fields"}, "data_dictionary.json", errors)
     coverage_required = {"schema_version", "goal_id", "dimensions", "required_source_classes", "required_cells", "completion_rule"}
@@ -454,6 +545,13 @@ def main() -> int:
         if attempt_id == retry_of:
             errors.append(f"collection_attempts.jsonl:{line_no}: attempt cannot retry itself")
 
+    for executor_id, pilot_attempt_id in selected_external_attempts:
+        if pilot_attempt_id not in collection_attempt_ids:
+            errors.append(
+                "run_manifest.json.coordination: external executor "
+                f"{executor_id!r} references unknown pilot_attempt_id {pilot_attempt_id!r}"
+            )
+
     if attempt_cost_seen and (not isinstance(manifest.get("cost_unit"), str) or not manifest.get("cost_unit")):
         warnings.append("collection attempts contain cost but run_manifest.json has no cost_unit")
 
@@ -589,9 +687,27 @@ def main() -> int:
 
     task_ids: set[str] = set()
     active_partitions: list[str] = []
+    active_resource_leases: list[str] = []
+    child_agent_task_count = 0
+    external_task_ids: set[str] = set()
+    task_runner_counts: Counter[str] = Counter()
     for row in tasks:
         label = f"tasks.jsonl:{row['_line']}"
-        require(row, {"task_id", "goal_id", "input_snapshot", "partition_key", "owner", "status", "attempt"}, label, errors)
+        task_required = {"task_id", "goal_id", "input_snapshot", "partition_key", "owner", "status", "attempt"}
+        if requires_execution_routing:
+            task_required.update(
+                {
+                    "runner_class",
+                    "executor_id",
+                    "dispatch_reason",
+                    "expected_output_schema",
+                    "acceptance_metric",
+                    "escalation_condition",
+                    "allowed_side_effects",
+                    "resource_lease_keys",
+                }
+            )
+        require(row, task_required, label, errors)
         if row.get("task_id") in task_ids:
             errors.append(f"{label}: duplicate task_id {row.get('task_id')!r}")
         task_ids.add(row.get("task_id"))
@@ -603,8 +719,55 @@ def main() -> int:
             errors.append(f"{label}: invalid status {row.get('status')!r}")
         if row.get("status") in ACTIVE_TASK_STATES and row.get("partition_key"):
             active_partitions.append(row["partition_key"])
+        if requires_execution_routing:
+            runner_class = row.get("runner_class")
+            if runner_class not in RUNNER_CLASSES:
+                errors.append(f"{label}: invalid runner_class {runner_class!r}")
+            else:
+                task_runner_counts[runner_class] += 1
+            for field in (
+                "executor_id",
+                "dispatch_reason",
+                "expected_output_schema",
+                "acceptance_metric",
+                "escalation_condition",
+            ):
+                if not isinstance(row.get(field), str) or not row.get(field):
+                    errors.append(f"{label}: {field} must be a non-empty string")
+            as_string_set(row.get("allowed_side_effects"), f"{label}.allowed_side_effects", errors)
+            resource_keys = as_string_set(row.get("resource_lease_keys"), f"{label}.resource_lease_keys", errors)
+            if row.get("status") in ACTIVE_TASK_STATES:
+                active_resource_leases.extend(resource_keys)
+            if runner_class == "child_agent":
+                child_agent_task_count += 1
+                if row.get("model_tier") not in MODEL_TIERS:
+                    errors.append(f"{label}: child_agent requires a valid model_tier")
+                if row.get("reasoning_tier") not in REASONING_TIERS:
+                    errors.append(f"{label}: child_agent requires a valid reasoning_tier")
+            if runner_class == "external_cli":
+                executor_id = row.get("executor_id")
+                if isinstance(executor_id, str):
+                    external_task_ids.add(executor_id)
+                if row.get("readiness_state") not in SOURCE_STATES:
+                    errors.append(f"{label}: external_cli requires a valid readiness_state")
+                if row.get("status") in ACTIVE_TASK_STATES and row.get("readiness_state") not in {"ready", "degraded"}:
+                    errors.append(f"{label}: active external_cli task is not runtime-ready")
     for value in duplicates(active_partitions):
         errors.append(f"multiple active task leases for partition_key {value!r}")
+    for value in duplicates(active_resource_leases):
+        errors.append(f"multiple active task leases for resource_lease_key {value!r}")
+    if requires_execution_routing:
+        child_decision = coordination.get("child_agent_decision")
+        if child_decision == "delegated" and child_agent_task_count == 0:
+            errors.append("coordination declares delegated child agents but tasks.jsonl has no child_agent task")
+        if child_decision != "delegated" and child_agent_task_count > 0:
+            errors.append("tasks.jsonl contains child_agent work but coordination does not declare delegation")
+        missing_external_tasks = sorted(selected_external_ids - external_task_ids)
+        if missing_external_tasks:
+            errors.append(
+                "selected external executors have no external_cli task: "
+                f"{missing_external_tasks}"
+            )
 
     claim_ids: set[str] = set()
     for row in claims:
@@ -666,6 +829,14 @@ def main() -> int:
         "observations": len(observations),
         "raw_artifacts": len(raw_artifacts),
         "tasks": len(tasks),
+        "tasks_by_runner_class": dict(sorted(task_runner_counts.items())),
+        "coordination_assessed": coordination.get("assessed") if coordination else None,
+        "child_agent_decision": coordination.get("child_agent_decision") if coordination else None,
+        "external_executors_considered": len(
+            coordination.get("external_executor_decisions", [])
+            if isinstance(coordination.get("external_executor_decisions"), list)
+            else []
+        ),
         "claims": len(claims),
         "current_rows": len(current),
         "conflicts": len(conflicts),

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "1.3.0"
+SCHEMA_VERSION = "1.4.0"
 JSONL_FILES = (
     "sources.jsonl",
     "target_queue.jsonl",
@@ -138,6 +138,13 @@ def main() -> int:
         "as_of": as_of,
         "input_snapshot": snapshot,
         "cost_unit": args.cost_unit,
+        "coordination": {
+            "assessed": False,
+            "independent_lane_count": 0,
+            "child_agent_decision": "unassessed",
+            "child_agent_reason": None,
+            "external_executor_decisions": [],
+        },
         "route_registry_version": None,
         "parser_versions": {},
         "status": "initialized",
@@ -183,6 +190,7 @@ def main() -> int:
         json.dumps(
             {
                 "run_directory": str(output),
+                "schema_version": SCHEMA_VERSION,
                 "goal_id": goal_id,
                 "run_id": run_id,
                 "depth": args.depth,

@@ -36,6 +36,8 @@ Target status and field status have different grains. Keep target-stage attempts
 
 For schema `1.3.0` and later, target, raw-evidence, field, and attempt links are explicit. Every collection attempt and observation refers to a planned `target_id`; every planned target-field pair has a deterministic coverage cell; and every observation's `raw_hash` resolves to `raw_artifacts.jsonl`. This closes the gap between declared interfaces and executed evidence.
 
+For schema `1.4.0` and later, executor selection is also explicit. `run_manifest.json.coordination` records whether independent lanes were assessed, the child-agent delegation decision, its exception reason when applicable, and every considered external executor. A selected external executor resolves to both a real pilot attempt and an `external_cli` task; a declared child-agent delegation resolves to at least one `child_agent` task.
+
 ## Target and raw-artifact grain
 
 A target is an immutable retrieval or discovery unit, not its latest execution status. `target_queue.jsonl` records its canonical locator, route, page and source class, semantic dimensions, planned fields, priority, shard, partition, and planner version. Attempts and tasks carry changing execution state.
@@ -83,6 +85,19 @@ Keep the same `target_id` across retries and route changes. `attempt_id` is glob
 
 Canonicalize targets before assigning `target_id`: normalize scheme and host case, remove fragments and known tracking parameters, normalize locale rules deliberately, and prefer stable platform or listing identifiers when available. Preserve the original locator separately. Do not collapse URLs whose market, seller, variant, or language dimension is meaningful to the goal.
 
+## Task and executor grain
+
+Use one `tasks.jsonl` row per owned work lane. For schema `1.4.0` and later, every task also includes:
+
+- `runner_class`: `lead`, `child_agent`, `external_cli`, `native_tool`, or `deterministic_code`
+- exact `executor_id` and a concrete `dispatch_reason`
+- `expected_output_schema`, `acceptance_metric`, and `escalation_condition`
+- `allowed_side_effects` and `resource_lease_keys`
+- for child agents, portable `model_tier` and `reasoning_tier`
+- for external CLIs, current `readiness_state`
+
+The partition lease prevents duplicate ownership of data; resource leases prevent two active tasks from racing on the same session, profile, port, credential context, output artifact, or other exclusive runtime. An empty resource list is valid when the lane has no exclusive runtime dependency. Thread count and request concurrency remain attempt telemetry, not runner classes.
+
 ## Deterministic materialization
 
 The merger must produce the same current view regardless of input file order or batch order.
@@ -114,5 +129,7 @@ Do not silently carry forward an older dynamic value when the current run has no
 - target-plan reproducibility: reordered axis inputs produce the same targets, cells, and shard assignments
 - raw-evidence linkage: every current-run observation resolves to a registered raw artifact or an explicit non-retention record
 - telemetry honesty: missing cost or usage stays unknown and is never converted to zero
+- dispatch visibility: selected child agents and external executors resolve to real tasks and pilots; non-selection has an explicit reason
+- resource-lease exclusivity: active tasks cannot share a partition or exclusive runtime lease key
 
 Use `../scripts/merge_observations.py`, `../scripts/summarize_collection_run.py`, and `../scripts/validate_research_run.py` for the base implementation. Extend the schema only when a recurring field requires it; version the schema and add a regression case.

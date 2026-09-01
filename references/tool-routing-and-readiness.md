@@ -45,6 +45,26 @@ Before declaring a route ready in the current run, verify the smallest relevant 
 
 A version command, successful installer, visible GUI, configured connector, or historical success is not runtime acceptance. Store `last_verified_at`, target type, and actual result state.
 
+## Dispatch gate for external executors
+
+Do not enumerate every executable on the machine. Build a small candidate roster from tools or CLIs named by the user, project instructions, selected Skill integrations, or a material capability gap in the current route. For each candidate, record one `external_executor_decisions` entry in the run manifest:
+
+| Decision | Use when |
+|---|---|
+| `selected` | its distinctive capability passed a real read-only target pilot and it has a bounded task |
+| `duplicate_capability` | a validated current route already provides the same capability at equal or better yield and cost |
+| `unavailable` | the executable, endpoint, compatible version, or dependency is absent |
+| `auth_blocked` | required authorized credentials or permissions are unavailable |
+| `cost_blocked` | the needed paid run is not authorized or exceeds the declared ceiling |
+| `failed_pilot` | a real target attempt failed its content, identity, field, recovery, or economics gate |
+| `not_needed` | the capability does not close a material coverage or quality gap in this run |
+
+For a `selected` or `failed_pilot` candidate, link the decision to its append-only pilot attempt. A selected executor must also own an `external_cli` task with an explicit output schema, acceptance metric, escalation condition, and runtime readiness state. Do not mark a candidate selected after only reading documentation, printing help, checking a version, or confirming login.
+
+After a pilot passes, give the executor a mutually exclusive bounded lane. Keep the lead controller responsible for the goal, evidence contract, merge, and final conclusion. If the CLI is a semantic model rather than a deterministic retriever, treat its output as a worker package that must pass the same evidence and field gates as a child agent. If it is only a deterministic runtime, do not pretend its parallel processes are independent agents.
+
+This gate prevents two opposite failures: never invoking a distinctive available capability, and invoking many overlapping CLIs merely because they are installed. Strict validation checks that selected executors have both a pilot attempt and a task assignment.
+
 ## Evaluate managed and black-box collectors
 
 A publicly listed or callable collector is not necessarily open source, locally reproducible, or licensed for copying. Before treating a managed crawler, hosted extraction service, or opaque API as reusable technology, separate five layers:

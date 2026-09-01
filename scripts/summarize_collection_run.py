@@ -138,6 +138,7 @@ def main() -> int:
     target_queue = load_jsonl(root / "target_queue.jsonl", errors, required=False)
     coverage = load_jsonl(root / "coverage.jsonl", errors, required=False)
     raw_artifacts = load_jsonl(root / "raw_artifacts.jsonl", errors, required=False)
+    tasks = load_jsonl(root / "tasks.jsonl", errors, required=False)
 
     required = {
         "attempt_id",
@@ -398,6 +399,7 @@ def main() -> int:
         str(row.get("state")) in {"checked_hit", "checked_no_confirmation", "blocked"}
         for row in latest_coverage.values()
     )
+    tasks_by_runner_class = Counter(str(row.get("runner_class") or "unspecified") for row in tasks)
 
     summary = {
         "schema_version": "1.1.0",
@@ -449,6 +451,11 @@ def main() -> int:
             "cost_unit": manifest.get("cost_unit"),
             "raw_artifacts": len(raw_artifacts),
             "unique_raw_payload_hashes": len({str(row.get("sha256")) for row in raw_artifacts if row.get("sha256")}),
+        },
+        "coordination": {
+            "decision": manifest.get("coordination"),
+            "tasks": len(tasks),
+            "tasks_by_runner_class": dict(sorted(tasks_by_runner_class.items())),
         },
         "batches_marginal_yield": batch_summary,
         "stages": stage_summary,
