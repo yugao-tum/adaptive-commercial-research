@@ -12,12 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "1.2.0"
+SCHEMA_VERSION = "1.3.0"
 JSONL_FILES = (
     "sources.jsonl",
+    "target_queue.jsonl",
     "collection_attempts.jsonl",
     "coverage.jsonl",
     "observations.jsonl",
+    "raw_artifacts.jsonl",
     "tasks.jsonl",
     "claims.jsonl",
     "current_view.jsonl",
@@ -59,6 +61,10 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--success", action="append", default=[])
     p.add_argument("--stop", action="append", default=[])
     p.add_argument("--assumption", action="append", default=[])
+    p.add_argument(
+        "--cost-unit",
+        help="Single unit used by every collection_attempts.jsonl cost value, for example USD or credits",
+    )
     p.add_argument("--as-of", help="Research time boundary; defaults to current UTC time")
     p.add_argument("--goal-id", help="Existing goal ID; generated when omitted")
     p.add_argument("--run-id", help="Existing run ID; generated when omitted")
@@ -131,6 +137,7 @@ def main() -> int:
         "created_at": created_at,
         "as_of": as_of,
         "input_snapshot": snapshot,
+        "cost_unit": args.cost_unit,
         "route_registry_version": None,
         "parser_versions": {},
         "status": "initialized",

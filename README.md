@@ -16,6 +16,10 @@ It is designed for research about businesses, companies, brands, channels, produ
 - A two-pass discovery and extraction pipeline that increases unique valid records without sending every target through the most expensive route.
 - Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.
 - A reproducible collection funnel covering discovery, fetch, parse, extraction, valid-record yield, duplicates, unresolved targets, and retry recovery.
+- Deterministic target-universe expansion, canonical target-field cells, explicit exclusions, and stable shards.
+- Content-addressed raw-evidence registration for reparse-before-refetch recovery.
+- Pilot output gates that test actual emitted fields rather than trusting extractor declarations.
+- Field-, batch-, route-, executor-, cost-, token-, latency-, and byte-level efficiency summaries.
 - One-pass extraction of independently evidenced in-scope fields from expensive payloads, with reparse-before-refetch recovery.
 - Append-only JSONL observations with deterministic current views and retained conflicts.
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
@@ -28,7 +32,8 @@ It is designed for research about businesses, companies, brands, channels, produ
 Clone the repository into the Codex skills directory:
 
 ```powershell
-git clone https://github.com/yugao-tum/adaptive-commercial-research.git "$env:USERPROFILE\.codex\skills\adaptive-commercial-research"
+Set-Location "$env:USERPROFILE\.codex\skills"
+gh repo clone yugao-tum/adaptive-commercial-research
 ```
 
 Restart or refresh Codex so the Skill is rediscovered. Invoke it explicitly with `$adaptive-commercial-research`, or let Codex select it for substantive multi-source commercial research.
@@ -58,12 +63,16 @@ adaptive-commercial-research/
 │   ├── evidence-and-coverage.md
 │   ├── tool-routing-and-readiness.md
 │   ├── collection-throughput-and-recovery.md
+│   ├── collection-plan-schema.md
 │   ├── data-contract-and-merge.md
 │   ├── parallel-research-protocol.md
 │   ├── skill-integrations.md
 │   └── output-contract.md
 ├── scripts/
 │   ├── init_research_run.py
+│   ├── plan_collection.py
+│   ├── register_raw_artifact.py
+│   ├── validate_pilot_output.py
 │   ├── merge_observations.py
 │   ├── summarize_collection_run.py
 │   └── validate_research_run.py
@@ -83,12 +92,25 @@ python scripts/init_research_run.py `
   --decision-use "Support a channel decision" `
   --mode coverage-sweep `
   --depth standard `
+  --cost-unit credits `
   --required-field price `
   --optional-field seller `
   --excluded-field orderable
 ```
 
-For schema 1.2 runs, complete `field_contract.json` with the extractor output fields and acceptance fields before broad execution. Strict validation rejects a required field that was silently omitted by either layer.
+For schema 1.2 and later runs, complete `field_contract.json` with the extractor output fields and acceptance fields before broad execution. Strict validation rejects a required field that was silently omitted by either layer.
+
+Schema 1.3 adds `target_queue.jsonl` and `raw_artifacts.jsonl`. Use a project-local JSON plan to expand bounded axes and templates without embedding source-specific locators in the Skill:
+
+```powershell
+python scripts/plan_collection.py .\run-example --spec .\collection-plan.json
+```
+
+Validate a completed pilot partition before scale-up:
+
+```powershell
+python scripts/validate_pilot_output.py .\run-example --shard-id 0 --strict
+```
 
 Materialize observations while preventing silent backfill of current dynamic fields:
 
@@ -132,6 +154,10 @@ The repository test suite checks:
 - strict cross-file run validation
 - collection-attempt schema and retry-link validation
 - deterministic collection funnel and retry-recovery metrics
+- deterministic target planning and stable shard assignment
+- content-addressed raw-payload deduplication and provenance
+- actual target-field pilot acceptance
+- field-level completion and marginal batch efficiency metrics
 
 Run it with:
 

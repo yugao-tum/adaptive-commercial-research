@@ -33,6 +33,8 @@ Prioritize in this order unless the goal contract says otherwise:
 
 Use pagination, sitemaps, site maps, category pages, feeds, structured endpoints, exports, and identifier enumeration to increase breadth. Search-result pages are discovery surfaces, not proof that all underlying records were captured.
 
+For a bounded matrix, use `../scripts/plan_collection.py` to expand declared axes and locator templates into `target_queue.jsonl`. The planner canonicalizes locators, removes known tracking parameters, assigns stable target IDs, creates target-field coverage cells, applies explicit exclusions, and assigns stable shards. Keep platform-specific templates in the project; the Skill owns only the portable expansion and identity rules. Read [collection-plan-schema.md](collection-plan-schema.md) for the plan interface and identity cautions.
+
 Track marginal yield by route and source family. Expand queries from missing coverage cells and from retrieved-but-unused aliases, identifiers, entities, and page types. Stop expanding a route when repeated batches add few unique valid records and another route has higher expected yield.
 
 ## Pilot and adaptive batch sizing
@@ -45,9 +47,13 @@ Pilot each materially different domain and page type with a small, diverse batch
 - duplicate and empty-content rates
 - latency, cost, rate limits, challenges, and blocker classes
 
+Record a terminal field-scoped coverage state even when a pilot produces no observation. Before scale-up, run `../scripts/validate_pilot_output.py --strict` on the pilot partition. A declared extractor interface is not accepted until actual `checked_hit` cells have observations and every selected target-field cell has a consistent terminal outcome.
+
 Set concurrency per host and adapter, not globally. Increase batch size or concurrency gradually while success and latency remain stable. On rate limits, rising timeouts, challenge pages, or partial-result loss, honor server guidance, reduce concurrency, shrink batches, and resume from the last durable checkpoint. Do not use a fixed concurrency value as a universal rule.
 
 Persist each completed page, cursor, or bounded batch before requesting the next one. A restarted run must be able to identify completed targets, pending targets, the last cursor, and retry history without replaying successful work.
+
+Register an authorized raw response with `../scripts/register_raw_artifact.py` before field parsing when retaining it is permitted. The registry keeps target, attempt, route, hash, storage, access, and retrieval context separate from observations. Identical bytes share content-addressed storage while each retrieval retains its own provenance row.
 
 ## Failure taxonomy and route changes
 
@@ -72,6 +78,8 @@ Keep adapter or wrapper status separate from content classification. If an outer
 
 Write one append-only `collection_attempts.jsonl` row for every target-stage attempt. The grain is one target, one stage, one adapter call, and one attempt number. Required fields are defined in [data-contract-and-merge.md](data-contract-and-merge.md).
 
+When available, also record `route_id`, `executor_class`, `elapsed_ms`, `cost`, `input_tokens`, `output_tokens`, and `bytes_received`. Missing telemetry remains unknown rather than zero. Declare one run-level unit with `init_research_run.py --cost-unit`; strict validation rejects cost rows whose unit is unknown.
+
 Log attempts before synthesizing success metrics. Never reconstruct failures only from prose or tool output. Do not overwrite a failed attempt when a later route succeeds; recovery rate depends on retaining both.
 
 ## Throughput and success gates
@@ -91,8 +99,11 @@ Report at least:
 - route-level yield and success rate
 - required-field observations and completion by field
 - target terminalization separately from required-field completion
+- marginal new records by bounded batch
+- cost, tokens, elapsed attempt time, and bytes per accepted new record when reported
+- route and executor efficiency under the same acceptance rule
 
-Raw request count, total downloaded pages, terminal target count, and successful HTTP status alone do not demonstrate useful collection. Use `../scripts/summarize_collection_run.py` to derive comparable metrics from the attempt and observation ledgers.
+Raw request count, total downloaded pages, terminal target count, and successful HTTP status alone do not demonstrate useful collection. Use `../scripts/summarize_collection_run.py` to derive comparable field, batch, route, executor, cost, and recovery metrics from the append-only ledgers. Summed attempt time is not wall-clock time when work ran concurrently.
 
 ## Stop and switch rules
 

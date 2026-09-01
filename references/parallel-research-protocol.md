@@ -49,6 +49,8 @@ Do not partition by vague instructions such as “research broadly.” Each task
 
 Only one active lease may exist for a partition key. Expired or blocked work returns to the queue with its checkpoint; it is not silently duplicated.
 
+For matrix-scale collection, prefer the stable `shard_id` and `partition_key` produced by `plan_collection.py` over handwritten row ranges. The same target plan and shard count must reproduce the same ownership boundaries. Changing shard count creates a new plan revision and requires the controller to reconcile completed targets before issuing new leases.
+
 ## Worker result package
 
 Workers return append-only packages containing:

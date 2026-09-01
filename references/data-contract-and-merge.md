@@ -14,9 +14,11 @@ The canonical machine layer is append-only JSONL plus versioned JSON contracts:
 | `data_dictionary.json` | Unit of analysis, stable keys, field semantics, types, units, and currentness classes |
 | `coverage_plan.json` | Declared source universe, matrix dimensions, required cells, and completion rule |
 | `sources.jsonl` | One source record per stable source ID |
+| `target_queue.jsonl` | Immutable canonical target definitions, planned fields, priorities, and stable partitions |
 | `collection_attempts.jsonl` | Append-only target-stage attempts, retries, checkpoints, failure classes, and route yield |
 | `coverage.jsonl` | Append-only attempts and states for coverage cells |
 | `observations.jsonl` | Append-only target-field observations |
+| `raw_artifacts.jsonl` | Raw-payload hashes, storage state, access class, and target-attempt provenance |
 | `tasks.jsonl` | Task ownership, attempts, checkpoints, and terminal states |
 | `claims.jsonl` | Material conclusions and source links |
 | `current_view.jsonl` | Deterministically materialized field values |
@@ -31,6 +33,14 @@ For schema `1.2.0` and later, `goal_contract.json` and `field_contract.json` dec
 The parity check verifies declared interfaces, not the truthfulness of an implementation. Bind extractor declarations to a parser version and verify the pilot's actual observations and acceptance report before scaling. When a collector already retrieves evidence for an in-scope optional field, add a separate field observation rather than hiding it inside another field's excerpt.
 
 Target status and field status have different grains. Keep target-stage attempts in `collection_attempts.jsonl` and target-field outcomes in observations or field-scoped coverage cells. A target can be terminal while one or more required fields remain blocked or unobserved.
+
+For schema `1.3.0` and later, target, raw-evidence, field, and attempt links are explicit. Every collection attempt and observation refers to a planned `target_id`; every planned target-field pair has a deterministic coverage cell; and every observation's `raw_hash` resolves to `raw_artifacts.jsonl`. This closes the gap between declared interfaces and executed evidence.
+
+## Target and raw-artifact grain
+
+A target is an immutable retrieval or discovery unit, not its latest execution status. `target_queue.jsonl` records its canonical locator, route, page and source class, semantic dimensions, planned fields, priority, shard, partition, and planner version. Attempts and tasks carry changing execution state.
+
+Use a content-addressed raw store when retention is authorized. One raw-artifact row represents one target-attempt provenance link; multiple rows may reference the same stored hash. A stored row includes a relative path and byte count. An external or deliberately unretained artifact records its storage state and retention reason instead of pretending the payload was preserved.
 
 ## Stable grain and keys
 
@@ -64,6 +74,8 @@ Each row must include:
 - `started_at` and `finished_at`
 - optional `retry_of_attempt_id`, cursor or checkpoint, and next route
 - optional non-negative `valid_record_count` and `new_record_count`
+- optional non-negative `elapsed_ms`, `cost`, `input_tokens`, `output_tokens`, and `bytes_received`
+- optional `route_id` and `executor_class` for comparable resource allocation
 - `error_category` and optional stable error fingerprint whenever the result is a failure
 
 Keep the same `target_id` across retries and route changes. `attempt_id` is globally unique. A later success does not replace a failed row. `batch_id` groups a bounded, resumable unit but is never an identity key for the target or observation.
@@ -98,5 +110,8 @@ Do not silently carry forward an older dynamic value when the current run has no
 - metric reproducibility: collection funnel and route metrics rebuild from append-only attempts and observations
 - field-contract parity: required fields cannot disappear between goal, dictionary, extractor, and acceptance layers
 - terminalization separation: completing every target does not synthesize missing target-field observations
+- target-plan reproducibility: reordered axis inputs produce the same targets, cells, and shard assignments
+- raw-evidence linkage: every current-run observation resolves to a registered raw artifact or an explicit non-retention record
+- telemetry honesty: missing cost or usage stays unknown and is never converted to zero
 
 Use `../scripts/merge_observations.py`, `../scripts/summarize_collection_run.py`, and `../scripts/validate_research_run.py` for the base implementation. Extend the schema only when a recurring field requires it; version the schema and add a regression case.

@@ -32,6 +32,7 @@ FIELD_KINDS = {"static", "slowly_changing", "dynamic"}
 SOURCE_STRENGTHS = {"direct_primary", "official_secondary", "independent_secondary", "weak_signal", "unknown"}
 SOURCE_STATES = {"ready", "degraded", "blocked", "unknown"}
 ACCESS_CLASSES = {"public", "internal", "private", "restricted"}
+RAW_STORAGE_STATES = {"stored", "external", "not_retained"}
 COLLECTION_STAGES = {"discover", "fetch", "render", "parse", "extract"}
 COLLECTION_STATUSES = {
     "success",
@@ -54,6 +55,18 @@ COLLECTION_NON_FAILURE_STATES = {"success", "partial", "skipped_duplicate"}
 def stable_hash(value: object) -> str:
     payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def stable_id(prefix: str, value: object) -> str:
+    return f"{prefix}-{stable_hash(value)[:24]}"
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def version_at_least(value: object, minimum: tuple[int, int, int]) -> bool:
@@ -133,6 +146,7 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("run_directory")
     p.add_argument("--strict", action="store_true", help="Treat warnings as errors")
+    p.add_argument("--verify-raw-files", action="store_true", help="Recompute hashes for stored raw artifacts")
     return p
 
 
@@ -181,6 +195,10 @@ def main() -> int:
     attempts_path = root / "collection_attempts.jsonl"
     if version_at_least(manifest.get("schema_version"), (1, 1, 0)) and not attempts_path.is_file():
         errors.append("missing required file for schema >= 1.1.0: collection_attempts.jsonl")
+    requires_control_plane = version_at_least(manifest.get("schema_version"), (1, 3, 0))
+    for name in ("target_queue.jsonl", "raw_artifacts.jsonl"):
+        if requires_control_plane and not (root / name).is_file():
+            errors.append(f"missing required file for schema >= 1.3.0: {name}")
     for field in ("schema_version", "goal_id", "mode", "depth", "as_of"):
         if goal.get(field) != manifest.get(field):
             errors.append(f"goal_contract.json and run_manifest.json disagree on {field}")
@@ -276,9 +294,11 @@ def main() -> int:
                 errors.append(f"field_contract.json.{label} contains fields outside the contract: {outside_contract}")
 
     sources = load_jsonl(root / "sources.jsonl", errors)
+    targets = load_jsonl(root / "target_queue.jsonl", errors) if (root / "target_queue.jsonl").is_file() else []
     collection_attempts = load_jsonl(attempts_path, errors) if attempts_path.is_file() else []
     coverage = load_jsonl(root / "coverage.jsonl", errors)
     observations = load_jsonl(root / "observations.jsonl", errors)
+    raw_artifacts = load_jsonl(root / "raw_artifacts.jsonl", errors) if (root / "raw_artifacts.jsonl").is_file() else []
     tasks = load_jsonl(root / "tasks.jsonl", errors)
     claims = load_jsonl(root / "claims.jsonl", errors)
     current = load_jsonl(root / "current_view.jsonl", errors)
@@ -298,7 +318,68 @@ def main() -> int:
             errors.append(f"{label}: duplicate source_id {row.get('source_id')!r}")
         source_ids.add(row.get("source_id"))
 
+    target_ids: set[str] = set()
+    target_fields: dict[str, set[str]] = {}
+    planned_cell_ids: set[str] = set()
+    for row in targets:
+        label = f"target_queue.jsonl:{row['_line']}"
+        require(
+            row,
+            {
+                "target_id",
+                "run_id",
+                "goal_id",
+                "template_id",
+                "target_type",
+                "page_type",
+                "source_class",
+                "route_id",
+                "locator",
+                "dimensions",
+                "coverage_fields",
+                "priority",
+                "shard_id",
+                "partition_key",
+                "batch_id",
+                "planned_at",
+                "planner_version",
+            },
+            label,
+            errors,
+        )
+        target_id = row.get("target_id")
+        if not isinstance(target_id, str) or not target_id:
+            errors.append(f"{label}: target_id must be a non-empty string")
+            continue
+        if target_id in target_ids:
+            errors.append(f"{label}: duplicate target_id {target_id!r}")
+        target_ids.add(target_id)
+        if row.get("run_id") != manifest.get("run_id"):
+            errors.append(f"{label}: run_id mismatch")
+        if row.get("goal_id") != manifest.get("goal_id"):
+            errors.append(f"{label}: goal_id mismatch")
+        if not isinstance(row.get("dimensions"), dict):
+            errors.append(f"{label}: dimensions must be an object")
+        fields = as_string_set(row.get("coverage_fields"), f"{label}.coverage_fields", errors)
+        target_fields[target_id] = fields
+        outside_contract = sorted(fields - (required_fields | optional_fields))
+        if outside_contract:
+            errors.append(f"{label}: coverage_fields outside field contract: {outside_contract}")
+        if not isinstance(row.get("priority"), int) or isinstance(row.get("priority"), bool):
+            errors.append(f"{label}: priority must be an integer")
+        if not isinstance(row.get("shard_id"), int) or isinstance(row.get("shard_id"), bool) or row.get("shard_id") < 0:
+            errors.append(f"{label}: shard_id must be a non-negative integer")
+        for field in fields:
+            planned_cell_ids.add(stable_id("CELL", {"target_id": target_id, "field": field}))
+
+    if requires_control_plane:
+        declared_cells = as_string_set(coverage_plan.get("required_cells"), "coverage_plan.json.required_cells", errors)
+        missing_cells = sorted(planned_cell_ids - declared_cells)
+        if missing_cells:
+            errors.append(f"coverage_plan.json.required_cells missing planned target-field cells: {missing_cells[:10]}")
+
     collection_attempt_ids: set[str] = set()
+    attempt_cost_seen = False
     retry_links: list[tuple[str, str, int]] = []
     for row in collection_attempts:
         label = f"collection_attempts.jsonl:{row['_line']}"
@@ -329,6 +410,8 @@ def main() -> int:
             collection_attempt_ids.add(attempt_id)
         if row.get("run_id") != manifest.get("run_id"):
             errors.append(f"{label}: run_id mismatch")
+        if requires_control_plane and row.get("target_id") not in target_ids:
+            errors.append(f"{label}: unknown target_id {row.get('target_id')!r}")
         if row.get("stage") not in COLLECTION_STAGES:
             errors.append(f"{label}: invalid stage {row.get('stage')!r}")
         status = row.get("status")
@@ -343,6 +426,19 @@ def main() -> int:
             value = row.get(field, 0)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 errors.append(f"{label}: {field} must be a non-negative integer")
+        for field in ("elapsed_ms", "input_tokens", "output_tokens", "bytes_received"):
+            if field not in row:
+                continue
+            value = row.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        if "cost" in row:
+            attempt_cost_seen = True
+            value = row.get("cost")
+            if not isinstance(value, (int, float)) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: cost must be a non-negative number")
+        if "executor_class" in row and (not isinstance(row.get("executor_class"), str) or not row.get("executor_class")):
+            errors.append(f"{label}: executor_class must be a non-empty string")
         retry_of = row.get("retry_of_attempt_id")
         if retry_of is not None:
             retry_links.append((str(attempt_id), str(retry_of), row["_line"]))
@@ -355,10 +451,16 @@ def main() -> int:
         if attempt_id == retry_of:
             errors.append(f"collection_attempts.jsonl:{line_no}: attempt cannot retry itself")
 
+    if attempt_cost_seen and (not isinstance(manifest.get("cost_unit"), str) or not manifest.get("cost_unit")):
+        warnings.append("collection attempts contain cost but run_manifest.json has no cost_unit")
+
     cell_attempt_ids: list[str] = []
     for row in coverage:
         label = f"coverage.jsonl:{row['_line']}"
-        require(row, {"attempt_id", "cell_id", "run_id", "source_class", "object_scope", "field_scope", "market", "state", "retrieved_at"}, label, errors)
+        coverage_required_fields = {"attempt_id", "cell_id", "run_id", "source_class", "object_scope", "field_scope", "market", "state", "retrieved_at"}
+        if requires_control_plane:
+            coverage_required_fields.add("target_id")
+        require(row, coverage_required_fields, label, errors)
         if row.get("state") not in COVERAGE_STATES:
             errors.append(f"{label}: invalid state {row.get('state')!r}")
         if row.get("state") == "blocked" and not row.get("blocker_reason"):
@@ -366,9 +468,91 @@ def main() -> int:
         for source_id in as_list(row.get("source_ids", []), f"{label}.source_ids", errors):
             if source_id not in source_ids:
                 errors.append(f"{label}: unknown source_id {source_id!r}")
+        if requires_control_plane:
+            target_id = row.get("target_id")
+            if target_id not in target_ids:
+                errors.append(f"{label}: unknown target_id {target_id!r}")
+            field = row.get("field_scope")
+            if isinstance(target_id, str) and field not in target_fields.get(target_id, set()):
+                errors.append(f"{label}: field_scope {field!r} is not planned for target {target_id!r}")
+            expected_cell = stable_id("CELL", {"target_id": target_id, "field": field})
+            if row.get("cell_id") != expected_cell:
+                errors.append(f"{label}: cell_id does not match target_id and field_scope")
         cell_attempt_ids.append(row.get("attempt_id"))
     for value in duplicates([v for v in cell_attempt_ids if isinstance(v, str)]):
         errors.append(f"duplicate coverage attempt_id {value!r}")
+
+    raw_artifact_ids: set[str] = set()
+    raw_hashes: set[str] = set()
+    for row in raw_artifacts:
+        label = f"raw_artifacts.jsonl:{row['_line']}"
+        require(
+            row,
+            {
+                "raw_artifact_id",
+                "run_id",
+                "target_id",
+                "attempt_id",
+                "sha256",
+                "bytes",
+                "media_type",
+                "locator",
+                "retrieved_at",
+                "route_version",
+                "access_class",
+                "storage_state",
+            },
+            label,
+            errors,
+        )
+        artifact_id = row.get("raw_artifact_id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            errors.append(f"{label}: raw_artifact_id must be a non-empty string")
+        if artifact_id in raw_artifact_ids:
+            errors.append(f"{label}: duplicate raw_artifact_id {artifact_id!r}")
+        raw_artifact_ids.add(artifact_id)
+        if row.get("run_id") != manifest.get("run_id"):
+            errors.append(f"{label}: run_id mismatch")
+        if row.get("target_id") not in target_ids:
+            errors.append(f"{label}: unknown target_id {row.get('target_id')!r}")
+        if row.get("attempt_id") not in collection_attempt_ids:
+            errors.append(f"{label}: unknown attempt_id {row.get('attempt_id')!r}")
+        source_id = row.get("source_id")
+        if source_id is not None and source_id not in source_ids:
+            errors.append(f"{label}: unknown source_id {source_id!r}")
+        content_hash = row.get("sha256")
+        if not isinstance(content_hash, str) or len(content_hash) != 64:
+            errors.append(f"{label}: sha256 must be a 64-character hex digest")
+        else:
+            try:
+                int(content_hash, 16)
+            except ValueError:
+                errors.append(f"{label}: sha256 must be hexadecimal")
+            raw_hashes.add(content_hash)
+        if not isinstance(row.get("bytes"), int) or isinstance(row.get("bytes"), bool) or row.get("bytes") < 0:
+            errors.append(f"{label}: bytes must be a non-negative integer")
+        if row.get("access_class") not in ACCESS_CLASSES:
+            errors.append(f"{label}: invalid access_class {row.get('access_class')!r}")
+        storage_state = row.get("storage_state")
+        if storage_state not in RAW_STORAGE_STATES:
+            errors.append(f"{label}: invalid storage_state {storage_state!r}")
+        if storage_state == "stored":
+            relative_path = row.get("relative_path")
+            if not isinstance(relative_path, str) or not relative_path:
+                errors.append(f"{label}: stored artifact requires relative_path")
+            else:
+                artifact_path = (root / relative_path).resolve()
+                if root not in artifact_path.parents:
+                    errors.append(f"{label}: relative_path escapes the run directory")
+                elif not artifact_path.is_file():
+                    errors.append(f"{label}: stored artifact file is missing")
+                else:
+                    if artifact_path.stat().st_size != row.get("bytes"):
+                        errors.append(f"{label}: stored artifact byte count mismatch")
+                    if args.verify_raw_files and file_hash(artifact_path) != content_hash:
+                        errors.append(f"{label}: stored artifact hash mismatch")
+        elif not row.get("retention_reason"):
+            errors.append(f"{label}: non-stored artifact requires retention_reason")
 
     observation_ids: set[str] = set()
     observation_keys: set[str] = set()
@@ -376,7 +560,7 @@ def main() -> int:
         label = f"observations.jsonl:{row['_line']}"
         require(
             row,
-            {"observation_id", "run_id", "observation_key", "object_type", "object_id", "field", "field_kind", "value", "source_id", "evidence_type", "source_strength", "observed_at", "retrieved_at", "route_version", "parser_version", "raw_hash"},
+            {"observation_id", "run_id", "observation_key", "object_type", "object_id", "field", "field_kind", "value", "source_id", "evidence_type", "source_strength", "observed_at", "retrieved_at", "route_version", "parser_version", "raw_hash"} | ({"target_id"} if requires_control_plane else set()),
             label,
             errors,
         )
@@ -391,6 +575,14 @@ def main() -> int:
             errors.append(f"{label}: invalid field_kind {row.get('field_kind')!r}")
         if row.get("source_strength") not in SOURCE_STRENGTHS:
             errors.append(f"{label}: invalid source_strength {row.get('source_strength')!r}")
+        if requires_control_plane:
+            target_id = row.get("target_id")
+            if target_id not in target_ids:
+                errors.append(f"{label}: unknown target_id {target_id!r}")
+            if row.get("field") not in target_fields.get(str(target_id), set()):
+                errors.append(f"{label}: field is not planned for target {target_id!r}")
+            if row.get("raw_hash") not in raw_hashes:
+                errors.append(f"{label}: raw_hash is not registered in raw_artifacts.jsonl")
 
     task_ids: set[str] = set()
     active_partitions: list[str] = []
@@ -465,9 +657,11 @@ def main() -> int:
 
     summary = {
         "sources": len(sources),
+        "targets": len(targets),
         "collection_attempts": len(collection_attempts),
         "coverage_attempts": len(coverage),
         "observations": len(observations),
+        "raw_artifacts": len(raw_artifacts),
         "tasks": len(tasks),
         "claims": len(claims),
         "current_rows": len(current),

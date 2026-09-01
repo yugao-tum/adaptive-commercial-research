@@ -77,6 +77,46 @@ def rate(numerator: int, denominator: int) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
 
 
+def ratio(numerator: float, denominator: float) -> float | None:
+    return round(numerator / denominator, 6) if denominator else None
+
+
+def metric_sum(rows: list[dict[str, Any]], field: str) -> float | int | None:
+    values = [row[field] for row in rows if isinstance(row.get(field), (int, float)) and not isinstance(row.get(field), bool)]
+    if not values:
+        return None
+    total = sum(values)
+    return round(total, 6) if any(isinstance(value, float) for value in values) else total
+
+
+def efficiency(rows: list[dict[str, Any]]) -> dict[str, int | float | None]:
+    new_records = sum(int(row.get("new_record_count", 0)) for row in rows if row.get("status") in SUCCESS_STATUSES)
+    valid_records = sum(int(row.get("valid_record_count", 0)) for row in rows if row.get("status") in SUCCESS_STATUSES)
+    cost = metric_sum(rows, "cost")
+    input_tokens = metric_sum(rows, "input_tokens")
+    output_tokens = metric_sum(rows, "output_tokens")
+    elapsed_ms = metric_sum(rows, "elapsed_ms")
+    bytes_received = metric_sum(rows, "bytes_received")
+    return {
+        "attempts": len(rows),
+        "unique_targets": len({str(row.get("target_id")) for row in rows}),
+        "usable_targets": len({str(row.get("target_id")) for row in rows if row.get("status") in SUCCESS_STATUSES}),
+        "reported_valid_records": valid_records,
+        "reported_new_records": new_records,
+        "new_records_per_100_attempts": ratio(new_records * 100, len(rows)),
+        "cost": cost,
+        "cost_per_new_record": ratio(float(cost), new_records) if cost is not None else None,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "tokens_per_new_record": ratio(float((input_tokens or 0) + (output_tokens or 0)), new_records)
+        if input_tokens is not None or output_tokens is not None
+        else None,
+        "summed_attempt_elapsed_ms": elapsed_ms,
+        "elapsed_ms_per_new_record": ratio(float(elapsed_ms), new_records) if elapsed_ms is not None else None,
+        "bytes_received": bytes_received,
+    }
+
+
 def row_order(row: dict[str, Any]) -> tuple[str, int, str]:
     attempt_no = row.get("attempt_no")
     return (
@@ -92,8 +132,12 @@ def main() -> int:
     errors: list[str] = []
 
     manifest = load_json(root / "run_manifest.json", errors)
+    field_contract = load_json(root / "field_contract.json", errors) if (root / "field_contract.json").is_file() else {}
     attempts = load_jsonl(root / "collection_attempts.jsonl", errors)
     observations = load_jsonl(root / "observations.jsonl", errors, required=False)
+    target_queue = load_jsonl(root / "target_queue.jsonl", errors, required=False)
+    coverage = load_jsonl(root / "coverage.jsonl", errors, required=False)
+    raw_artifacts = load_jsonl(root / "raw_artifacts.jsonl", errors, required=False)
 
     required = {
         "attempt_id",
@@ -139,6 +183,19 @@ def main() -> int:
             value = row.get(field, 0)
             if not isinstance(value, int) or isinstance(value, bool) or value < 0:
                 errors.append(f"{label}: {field} must be a non-negative integer")
+        for field in ("elapsed_ms", "input_tokens", "output_tokens", "bytes_received"):
+            if field in row and (
+                not isinstance(row.get(field), int)
+                or isinstance(row.get(field), bool)
+                or row.get(field) < 0
+            ):
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        if "cost" in row and (
+            not isinstance(row.get("cost"), (int, float))
+            or isinstance(row.get("cost"), bool)
+            or row.get("cost") < 0
+        ):
+            errors.append(f"{label}: cost must be a non-negative number")
         retry_of = row.get("retry_of_attempt_id")
         if retry_of is not None:
             retry_links.append((str(attempt_id), str(retry_of), row["_line"]))
@@ -160,6 +217,9 @@ def main() -> int:
     by_target_stage: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
     by_stage: dict[str, list[dict[str, Any]]] = defaultdict(list)
     by_adapter: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_route: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_executor: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_batch: dict[str, list[dict[str, Any]]] = defaultdict(list)
     failure_attempts: Counter[str] = Counter()
 
     for row in attempts:
@@ -170,6 +230,9 @@ def main() -> int:
         by_target_stage[(target_id, stage)].append(row)
         by_stage[stage].append(row)
         by_adapter[adapter].append(row)
+        by_route[str(row.get("route_id") or row.get("route_version") or "unknown")].append(row)
+        by_executor[str(row.get("executor_class") or "unspecified")].append(row)
+        by_batch[str(row.get("batch_id"))].append(row)
         if row["status"] not in NON_FAILURE_STATUSES:
             failure_attempts[str(row["status"])] += 1
 
@@ -269,14 +332,80 @@ def main() -> int:
                 for row in rows
                 if row["status"] in SUCCESS_STATUSES
             ),
+            "efficiency": efficiency(rows),
         }
 
+    route_summary = {route: efficiency(rows) for route, rows in sorted(by_route.items())}
+    executor_summary = {executor: efficiency(rows) for executor, rows in sorted(by_executor.items())}
+    batch_rows = sorted(by_batch.items(), key=lambda item: min(str(row.get("started_at") or "") for row in item[1]))
+    cumulative_new_records = 0
+    batch_summary: list[dict[str, Any]] = []
+    for batch_id, rows in batch_rows:
+        metrics = efficiency(rows)
+        cumulative_new_records += int(metrics["reported_new_records"] or 0)
+        batch_summary.append({"batch_id": batch_id, **metrics, "cumulative_new_records": cumulative_new_records})
+
+    observations_by_field: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in observations:
+        if row.get("field"):
+            observations_by_field[str(row["field"])].append(row)
+    latest_coverage: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in coverage:
+        target_id = str(row.get("target_id") or "")
+        field = str(row.get("field_scope") or "")
+        if not target_id or not field:
+            continue
+        key = (target_id, field)
+        order = (str(row.get("retrieved_at") or ""), str(row.get("attempt_id") or ""), int(row.get("_line", 0)))
+        previous = latest_coverage.get(key)
+        previous_order = (
+            str(previous.get("retrieved_at") or ""),
+            str(previous.get("attempt_id") or ""),
+            int(previous.get("_line", 0)),
+        ) if previous else None
+        if previous_order is None or order > previous_order:
+            latest_coverage[key] = row
+    field_names = sorted(
+        set(field_contract.get("required_fields", []))
+        | set(field_contract.get("optional_fields", []))
+        | set(observations_by_field)
+        | {field for _, field in latest_coverage}
+    )
+    field_summary: dict[str, dict[str, Any]] = {}
+    for field in field_names:
+        field_rows = observations_by_field.get(field, [])
+        states = Counter(
+            str(row.get("state") or "unknown")
+            for (target_id, cell_field), row in latest_coverage.items()
+            if cell_field == field
+        )
+        planned_cells = sum(states.values())
+        terminal_cells = sum(states[state] for state in ("checked_hit", "checked_no_confirmation", "blocked"))
+        field_summary[field] = {
+            "required": field in set(field_contract.get("required_fields", [])),
+            "optional": field in set(field_contract.get("optional_fields", [])),
+            "observations": len(field_rows),
+            "unique_targets_observed": len({str(row.get("target_id")) for row in field_rows if row.get("target_id")}),
+            "unique_observation_keys": len({str(row.get("observation_key")) for row in field_rows if row.get("observation_key")}),
+            "planned_target_field_cells": planned_cells,
+            "terminal_target_field_cells": terminal_cells,
+            "terminalization_rate": rate(terminal_cells, planned_cells),
+            "states": dict(sorted(states.items())),
+        }
+
+    planned_target_ids = {str(row.get("target_id")) for row in target_queue if row.get("target_id")}
+    terminal_cells_total = sum(
+        str(row.get("state")) in {"checked_hit", "checked_no_confirmation", "blocked"}
+        for row in latest_coverage.values()
+    )
+
     summary = {
-        "schema_version": "1.0.0",
+        "schema_version": "1.1.0",
         "run_id": manifest.get("run_id"),
         "batches": len({str(row["batch_id"]) for row in attempts}),
         "total_attempts": len(attempts),
         "unique_targets": len(all_targets),
+        "planned_targets": len(planned_target_ids),
         "pipeline": {
             "discovered_targets": len(discovered),
             "fetch_attempted_targets": len(fetch_attempted),
@@ -309,8 +438,23 @@ def main() -> int:
                 {str(row["observation_key"]) for row in observations if row.get("observation_key")}
             ),
         },
+        "field_coverage": {
+            "planned_target_field_cells": len(latest_coverage),
+            "terminal_target_field_cells": terminal_cells_total,
+            "terminalization_rate": rate(terminal_cells_total, len(latest_coverage)),
+            "by_field": field_summary,
+        },
+        "efficiency": {
+            **efficiency(attempts),
+            "cost_unit": manifest.get("cost_unit"),
+            "raw_artifacts": len(raw_artifacts),
+            "unique_raw_payload_hashes": len({str(row.get("sha256")) for row in raw_artifacts if row.get("sha256")}),
+        },
+        "batches_marginal_yield": batch_summary,
         "stages": stage_summary,
         "adapters": adapter_summary,
+        "routes": route_summary,
+        "executors": executor_summary,
     }
 
     rendered = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"

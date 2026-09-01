@@ -14,13 +14,18 @@ SCRIPTS = ROOT / "scripts"
 
 
 def run_script(name: str, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         [sys.executable, str(SCRIPTS / name), *map(str, args)],
-        check=check,
+        check=False,
         capture_output=True,
         text=True,
         encoding="utf-8",
     )
+    if check and result.returncode:
+        raise AssertionError(
+            f"{name} failed with exit {result.returncode}\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+        )
+    return result
 
 
 def write_json(path: Path, value: object) -> None:
@@ -74,6 +79,35 @@ def observation(
     }
 
 
+def target(
+    target_id: str,
+    run_id: str,
+    goal_id: str,
+    planned_at: str,
+    coverage_fields: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        "target_id": target_id,
+        "run_id": run_id,
+        "goal_id": goal_id,
+        "template_id": "synthetic-template",
+        "target_type": "synthetic-target",
+        "page_type": "synthetic-page",
+        "source_class": "official",
+        "route_id": "synthetic-route",
+        "locator": f"https://example.test/item/{target_id}",
+        "original_locator": f"https://example.test/item/{target_id}",
+        "dimensions": {"object_id": target_id, "market": "test"},
+        "coverage_fields": coverage_fields or [],
+        "priority": 100,
+        "shard_id": 0,
+        "partition_key": "synthetic-template:shard-000",
+        "batch_id": "batch-synthetic-template-shard-000",
+        "planned_at": planned_at,
+        "planner_version": "1.0.0",
+    }
+
+
 class SkillStructureTests(unittest.TestCase):
     def test_required_files_and_local_links(self) -> None:
         required = [
@@ -83,6 +117,7 @@ class SkillStructureTests(unittest.TestCase):
             ROOT / "references" / "evidence-and-coverage.md",
             ROOT / "references" / "tool-routing-and-readiness.md",
             ROOT / "references" / "collection-throughput-and-recovery.md",
+            ROOT / "references" / "collection-plan-schema.md",
             ROOT / "references" / "data-contract-and-merge.md",
             ROOT / "references" / "parallel-research-protocol.md",
             ROOT / "references" / "skill-integrations.md",
@@ -125,6 +160,8 @@ class RuntimeTests(unittest.TestCase):
             "goal-test",
             "--run-id",
             "run-current",
+            "--cost-unit",
+            "credits",
             "--stop",
             "Tests pass",
         )
@@ -134,7 +171,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "data_dictionary.json",
             {
-                "schema_version": "1.2.0",
+                "schema_version": "1.3.0",
                 "goal_id": "goal-test",
                 "unit_of_analysis": "object x field x market x period",
                 "key_fields": ["object_type", "object_id", "field", "market", "period"],
@@ -144,7 +181,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "coverage_plan.json",
             {
-                "schema_version": "1.2.0",
+                "schema_version": "1.3.0",
                 "goal_id": "goal-test",
                 "dimensions": ["object", "field", "market", "source_class"],
                 "required_source_classes": ["official", "independent"],
@@ -203,7 +240,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "data_dictionary.json",
                 {
-                    "schema_version": "1.2.0",
+                    "schema_version": "1.3.0",
                     "goal_id": "goal-fields",
                     "unit_of_analysis": "listing x field x market x observation time",
                     "key_fields": ["listing_id", "field", "market", "observed_at"],
@@ -213,7 +250,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "coverage_plan.json",
                 {
-                    "schema_version": "1.2.0",
+                    "schema_version": "1.3.0",
                     "goal_id": "goal-fields",
                     "dimensions": ["listing", "field", "market"],
                     "required_source_classes": ["official"],
@@ -317,6 +354,13 @@ class RuntimeTests(unittest.TestCase):
                     "finished_at": f"2026-08-01T00:01:{attempt_no:02d}Z",
                     "valid_record_count": valid,
                     "new_record_count": valid,
+                    "elapsed_ms": 100,
+                    "cost": 0.01,
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "bytes_received": 100,
+                    "executor_class": "local-test",
+                    "route_id": "synthetic-route",
                 }
                 if status not in {"success", "partial", "skipped_duplicate"}:
                     row["error_category"] = status
@@ -339,6 +383,11 @@ class RuntimeTests(unittest.TestCase):
                 attempt("A-12", "T-4", "discover", "success"),
                 attempt("A-13", "T-4", "fetch", "skipped_duplicate"),
             ]
+            manifest = json.loads((run_dir / "run_manifest.json").read_text(encoding="utf-8"))
+            write_jsonl(
+                run_dir / "target_queue.jsonl",
+                [target(f"T-{number}", "run-current", "goal-test", manifest["created_at"]) for number in range(1, 5)],
+            )
             write_jsonl(run_dir / "collection_attempts.jsonl", attempts)
             self.complete_contract_files(run_dir)
             validated = run_script("validate_research_run.py", run_dir, "--strict")
@@ -362,12 +411,235 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(1, summary["pipeline"]["unresolved_targets"])
             self.assertEqual(1.0, summary["recovery"]["retry_recovery_rate"])
             self.assertEqual(2, summary["observations"]["unique_observation_keys"])
+            self.assertAlmostEqual(0.13, summary["efficiency"]["cost"])
+            self.assertAlmostEqual(0.065, summary["efficiency"]["cost_per_new_record"])
+            self.assertEqual(1, len(summary["batches_marginal_yield"]))
+            self.assertIn("synthetic-route", summary["routes"])
+            self.assertIn("local-test", summary["executors"])
 
             first = run_dir / "collection-metrics-a.json"
             second = run_dir / "collection-metrics-b.json"
             run_script("summarize_collection_run.py", run_dir, "--output", first)
             run_script("summarize_collection_run.py", run_dir, "--output", second)
             self.assertEqual(digest(first), digest(second))
+
+    def test_planner_raw_cache_and_pilot_gate_form_a_closed_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run_dir = root / "run"
+            run_script(
+                "init_research_run.py",
+                "--output",
+                run_dir,
+                "--goal",
+                "Collect planned target fields",
+                "--decision-use",
+                "Verify collection control plane",
+                "--mode",
+                "structured-extraction",
+                "--depth",
+                "standard",
+                "--goal-id",
+                "goal-plan",
+                "--run-id",
+                "run-plan",
+                "--cost-unit",
+                "credits",
+                "--required-field",
+                "price",
+                "--optional-field",
+                "seller",
+                "--stop",
+                "Every planned target-field cell is terminal",
+            )
+            write_json(
+                run_dir / "data_dictionary.json",
+                {
+                    "schema_version": "1.3.0",
+                    "goal_id": "goal-plan",
+                    "unit_of_analysis": "listing x field x market x observation time",
+                    "key_fields": ["listing_id", "field", "market", "observed_at"],
+                    "fields": {"price": {}, "seller": {}},
+                },
+            )
+            write_json(
+                run_dir / "coverage_plan.json",
+                {
+                    "schema_version": "1.3.0",
+                    "goal_id": "goal-plan",
+                    "dimensions": ["target", "field", "market"],
+                    "required_source_classes": ["official"],
+                    "required_cells": [],
+                    "required_fields": ["price"],
+                    "completion_rule": "Every planned target-field cell has a terminal state",
+                },
+            )
+            field_contract_path = run_dir / "field_contract.json"
+            field_contract = json.loads(field_contract_path.read_text(encoding="utf-8"))
+            field_contract["extractor_output_fields"] = ["price", "seller"]
+            field_contract["acceptance_fields"] = ["price"]
+            write_json(field_contract_path, field_contract)
+            spec_path = root / "plan.json"
+            write_json(
+                spec_path,
+                {
+                    "planned_at": "2026-09-01T00:00:00Z",
+                    "shard_count": 3,
+                    "axes": {
+                        "object_id": ["object-b", "object-a"],
+                        "market": ["BE", "NL"],
+                        "alias": ["desk chair", "chair"],
+                    },
+                    "templates": [
+                        {
+                            "template_id": "site-search",
+                            "vary_by": ["object_id", "market", "alias"],
+                            "identity_axes": ["object_id", "market", "alias"],
+                            "url_encode_axes": ["alias"],
+                            "target_type": "search-results",
+                            "page_type": "search",
+                            "source_class": "official",
+                            "route_id": "public-search-v1",
+                            "locator_template": "https://example.test/{market}/search?q={alias}&utm_source=test",
+                            "coverage_fields": ["price", "seller"],
+                        }
+                    ],
+                    "exclude": [
+                        {
+                            "template_id": "site-search",
+                            "object_id": "object-b",
+                            "market": "BE",
+                            "alias": "desk chair",
+                        }
+                    ],
+                },
+            )
+            planned = run_script("plan_collection.py", run_dir, "--spec", spec_path)
+            planned_summary = json.loads(planned.stdout)
+            self.assertEqual(7, planned_summary["generated_targets"])
+            self.assertEqual(14, planned_summary["generated_coverage_cells"])
+            queue_hash = digest(run_dir / "target_queue.jsonl")
+            coverage_hash = digest(run_dir / "coverage.jsonl")
+            planned_again = run_script("plan_collection.py", run_dir, "--spec", spec_path)
+            self.assertEqual(0, json.loads(planned_again.stdout)["new_targets"])
+            self.assertEqual(queue_hash, digest(run_dir / "target_queue.jsonl"))
+            self.assertEqual(coverage_hash, digest(run_dir / "coverage.jsonl"))
+
+            targets = [json.loads(line) for line in (run_dir / "target_queue.jsonl").read_text(encoding="utf-8").splitlines()]
+            pilot_target = targets[0]
+            source = {
+                "source_id": "S-001",
+                "source_type": "official_page",
+                "strength_grade": "direct_primary",
+                "access_class": "public",
+                "locator": pilot_target["locator"],
+                "retrieved_at": "2026-09-01T00:01:00Z",
+                "state": "ready",
+            }
+            write_jsonl(run_dir / "sources.jsonl", [source])
+            attempt_row = {
+                "attempt_id": "A-PILOT-1",
+                "run_id": "run-plan",
+                "batch_id": pilot_target["batch_id"],
+                "target_id": pilot_target["target_id"],
+                "stage": "extract",
+                "adapter": "synthetic-adapter",
+                "route_id": "public-search-v1",
+                "route_version": "1",
+                "attempt_no": 1,
+                "status": "success",
+                "started_at": "2026-09-01T00:00:30Z",
+                "finished_at": "2026-09-01T00:01:00Z",
+                "valid_record_count": 1,
+                "new_record_count": 1,
+                "elapsed_ms": 30000,
+                "cost": 0.02,
+            }
+            write_jsonl(run_dir / "collection_attempts.jsonl", [attempt_row])
+            payload = root / "payload.html"
+            payload.write_text("<html><body>price evidence</body></html>", encoding="utf-8")
+            registered = run_script(
+                "register_raw_artifact.py",
+                run_dir,
+                payload,
+                "--target-id",
+                pilot_target["target_id"],
+                "--attempt-id",
+                "A-PILOT-1",
+                "--source-id",
+                "S-001",
+                "--locator",
+                pilot_target["locator"],
+                "--retrieved-at",
+                "2026-09-01T00:01:00Z",
+                "--route-version",
+                "1",
+            )
+            raw = json.loads(registered.stdout)
+            registered_again = run_script(
+                "register_raw_artifact.py",
+                run_dir,
+                payload,
+                "--target-id",
+                pilot_target["target_id"],
+                "--attempt-id",
+                "A-PILOT-1",
+                "--source-id",
+                "S-001",
+                "--locator",
+                pilot_target["locator"],
+                "--retrieved-at",
+                "2026-09-01T00:01:00Z",
+                "--route-version",
+                "1",
+            )
+            self.assertFalse(json.loads(registered_again.stdout)["registry_appended"])
+            self.assertEqual(1, len((run_dir / "raw_artifacts.jsonl").read_text(encoding="utf-8").splitlines()))
+
+            coverage_rows = [json.loads(line) for line in (run_dir / "coverage.jsonl").read_text(encoding="utf-8").splitlines()]
+            for field, state in (("price", "checked_hit"), ("seller", "checked_no_confirmation")):
+                initial = next(
+                    row for row in coverage_rows
+                    if row["target_id"] == pilot_target["target_id"] and row["field_scope"] == field
+                )
+                coverage_rows.append(
+                    {
+                        **initial,
+                        "attempt_id": f"COV-{field}",
+                        "state": state,
+                        "retrieved_at": "2026-09-01T00:01:00Z",
+                        "source_ids": ["S-001"],
+                    }
+                )
+            write_jsonl(run_dir / "coverage.jsonl", coverage_rows)
+            price_observation = observation(
+                "OBS-PRICE-1",
+                "run-plan",
+                f"listing|{pilot_target['target_id']}|price|test|2026-09-01",
+                "price",
+                "dynamic",
+                19.99,
+                "S-001",
+                "direct_primary",
+                "2026-09-01T00:01:00Z",
+                "2026-09-01T00:01:00Z",
+            )
+            price_observation["target_id"] = pilot_target["target_id"]
+            price_observation["raw_hash"] = raw["sha256"]
+            write_jsonl(run_dir / "observations.jsonl", [price_observation])
+
+            pilot = run_script(
+                "validate_pilot_output.py",
+                run_dir,
+                "--target-id",
+                pilot_target["target_id"],
+                "--strict",
+            )
+            pilot_summary = json.loads(pilot.stdout)
+            self.assertTrue(pilot_summary["passed"])
+            self.assertEqual(1.0, pilot_summary["target_field_terminalization_rate"])
+            validated = run_script("validate_research_run.py", run_dir, "--strict", "--verify-raw-files")
+            self.assertEqual(0, json.loads(validated.stdout)["errors"])
 
 
 if __name__ == "__main__":

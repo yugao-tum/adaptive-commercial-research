@@ -41,12 +41,12 @@ Select the narrowest useful mode:
 
 ## Run the research
 
-1. Create a compact goal contract, field contract, data dictionary, source universe, and initial coverage matrix.
+1. Create a compact goal contract, field contract, data dictionary, and declared source universe. For matrix-scale collection, use the planner to materialize stable targets, target-field cells, and partitions before retrieval.
 2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale. Reconcile the field contract with the extractor and acceptance layer before the pilot.
 3. If project instructions name a local source or platform playbook, load only the relevant target, market, and page-type section. Record the referenced route version and treat every historical route as a prior, not current readiness.
-4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, required-field yield, stage success rates, precision, time, cost, duplicates, and blockers.
+4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, required-field yield, stage success rates, precision, time, cost, duplicates, and blockers. Validate real target-field outcomes before expanding the queue.
 5. Route by target field, source capability, and task complexity. Expand, switch, escalate, or stop a route from observed net yield, not advertised features, model prestige, successful HTTP responses, or request counts.
-6. Store sources, collection attempts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Use the scripts in `scripts/` when multiple batches or agents are involved.
+6. Store targets, sources, collection attempts, raw artifacts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Register reusable raw evidence before parsing so extractor fixes can reprocess it without refetching.
 7. Classify material operational learning as run-only evidence, a project-playbook update, a deterministic code/test fix, or a Skill-maintenance candidate. Update an authorized project-local playbook before closeout when the evidence gate is met; do not self-modify an installed Skill during an ordinary research run.
 8. Apply quality gates before synthesis: coverage visibility, claim-to-source traceability, key stability, conflict retention, currentness, and output navigation.
 9. Deliver the answer using [output-contract.md](references/output-contract.md). Do not return a process diary or an unstructured bullet dump.
@@ -64,8 +64,11 @@ Select the narrowest useful mode:
 ## Deterministic helpers
 
 - `scripts/init_research_run.py` creates a versioned run package after scope and depth are resolved.
+- `scripts/plan_collection.py` expands bounded dimension templates into canonical targets, target-field coverage cells, and stable shards.
+- `scripts/register_raw_artifact.py` stores authorized raw payloads by content hash while retaining target and attempt provenance.
+- `scripts/validate_pilot_output.py` verifies that real pilot targets have consistent field observations and terminal coverage states.
 - `scripts/merge_observations.py` builds a deterministic current view while retaining conflicts.
-- `scripts/summarize_collection_run.py` derives stage success, recovery, unresolved-target, and route-yield metrics from append-only ledgers.
+- `scripts/summarize_collection_run.py` derives stage success, field completion, marginal batch yield, recovery, cost, and route or executor efficiency from append-only ledgers.
 - `scripts/validate_research_run.py` checks contracts, IDs, states, references, task ownership, and merge outputs.
 
 Run helpers with `--help` before first use. A passing structural validator is necessary but does not prove that the research conclusion is correct.
