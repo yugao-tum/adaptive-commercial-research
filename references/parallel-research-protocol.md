@@ -18,6 +18,22 @@ Keep the work single-threaded when scope or identifiers are unresolved, later st
 
 For standard work, the controller may also merge and QA. For exhaustive or high-impact work, separate QA when agents are available and authorized.
 
+## Capability and resource tiering
+
+Do not assign every lane the strongest model, highest reasoning level, or maximum concurrency. Match resources to the work:
+
+| Work type | Default execution |
+|---|---|
+| goal, schema, field semantics, route design, conflict resolution, final synthesis | strong reasoning under the lead controller |
+| repeatable extraction after a validated pilot | lowest-cost agent or model that passes the same field and evidence checks |
+| normalization, deduplication, merge, counting, export, and invariant checks | deterministic local code |
+| ambiguous identity, variant semantics, parser exceptions, or route recovery | escalate only the affected cases |
+| independent QA | strong reviewer on a risk-based sample plus all exceptions |
+
+Alternative quotas or external agents may handle routine work only after a current-run real-target pilot proves the required tools, output schema, privacy boundary, and accuracy. Available credit or speed is not evidence of capability. Record the executor class, material model or route version, cost, latency, and accepted yield so later allocation is evidence-based.
+
+Start with a representative sample for each proposed tier. Promote routine lanes only when their accepted field yield and precision are adequate; escalate exceptions rather than the whole queue. Downgrade or stop a tier when retry recovery or net-new yield is poor.
+
 ## Partition rules
 
 Partitions must be mutually exclusive and collectively traceable. Split by one or more stable dimensions:
@@ -52,3 +68,5 @@ Workers do not edit the master report or current view. The controller rejects re
 Use durable checkpoints after each completed partition or batch. Limit identical retries; route-switch or return `blocked` after the cap. Do not make downstream tasks wait for a source that is optional to the decision. Escalate only prerequisites whose absence changes the agreed deliverable or evidence posture.
 
 The controller periodically reconciles coverage, not prose length. Progress is net new high-priority coverage, target-field yield, resolved conflicts, and reduced uncertainty. Pages, requests, tokens, and raw record counts are not sufficient progress measures.
+
+Set concurrency per host, route, and worker capability. Raise it gradually while accepted yield and latency remain stable; reduce it when blocker share, timeout rate, or duplicate work rises. A large blocked queue with low sampled recovery is a signal to change route or stop, not to add more premium agents.

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 JSONL_FILES = (
     "sources.jsonl",
     "collection_attempts.jsonl",
@@ -51,6 +51,9 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--depth", required=True, choices=("quick", "standard", "exhaustive"))
     p.add_argument("--in-scope", action="append", default=[])
     p.add_argument("--out-of-scope", action="append", default=[])
+    p.add_argument("--required-field", action="append", default=[], help="Field required for acceptance")
+    p.add_argument("--optional-field", action="append", default=[], help="In-scope field collected when evidence exposes it")
+    p.add_argument("--excluded-field", action="append", default=[], help="Field excluded from retrieval and acceptance")
     p.add_argument("--deliverable", action="append", default=[])
     p.add_argument("--must-preserve", action="append", default=[])
     p.add_argument("--success", action="append", default=[])
@@ -64,6 +67,26 @@ def parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = parser().parse_args()
+    field_groups: dict[str, list[str]] = {}
+    for label, raw_values in (
+        ("required", args.required_field),
+        ("optional", args.optional_field),
+        ("excluded", args.excluded_field),
+    ):
+        values = [value.strip() for value in raw_values]
+        if any(not value for value in values):
+            print(f"Refusing empty {label} field name", file=sys.stderr)
+            return 2
+        if len(values) != len(set(values)):
+            print(f"Refusing duplicate {label} field names", file=sys.stderr)
+            return 2
+        field_groups[label] = values
+    for left, right in (("required", "optional"), ("required", "excluded"), ("optional", "excluded")):
+        overlap = sorted(set(field_groups[left]) & set(field_groups[right]))
+        if overlap:
+            print(f"Field sets {left} and {right} overlap: {overlap}", file=sys.stderr)
+            return 2
+
     output = Path(args.output).expanduser().resolve()
     if output.exists() and not output.is_dir():
         print(f"Refusing to initialize over a file: {output}", file=sys.stderr)
@@ -87,6 +110,9 @@ def main() -> int:
         "depth": args.depth,
         "in_scope": args.in_scope,
         "out_of_scope": args.out_of_scope,
+        "required_fields": field_groups["required"],
+        "optional_fields": field_groups["optional"],
+        "excluded_fields": field_groups["excluded"],
         "deliverables": args.deliverable,
         "must_preserve": args.must_preserve,
         "success_conditions": args.success,
@@ -114,7 +140,19 @@ def main() -> int:
         "goal_id": goal_id,
         "unit_of_analysis": None,
         "key_fields": [],
-        "fields": {},
+        "fields": {
+            field: {}
+            for field in field_groups["required"] + field_groups["optional"]
+        },
+    }
+    field_contract = {
+        "schema_version": SCHEMA_VERSION,
+        "goal_id": goal_id,
+        "required_fields": field_groups["required"],
+        "optional_fields": field_groups["optional"],
+        "excluded_fields": field_groups["excluded"],
+        "extractor_output_fields": [],
+        "acceptance_fields": [],
     }
     coverage_plan = {
         "schema_version": SCHEMA_VERSION,
@@ -122,12 +160,14 @@ def main() -> int:
         "dimensions": [],
         "required_source_classes": [],
         "required_cells": [],
+        "required_fields": field_groups["required"],
         "completion_rule": None,
     }
 
     write_json(output / "goal_contract.json", contract)
     write_json(output / "run_manifest.json", manifest)
     write_json(output / "data_dictionary.json", data_dictionary)
+    write_json(output / "field_contract.json", field_contract)
     write_json(output / "coverage_plan.json", coverage_plan)
     for name in JSONL_FILES:
         (output / name).write_text("", encoding="utf-8")

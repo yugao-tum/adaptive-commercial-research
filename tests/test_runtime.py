@@ -134,7 +134,7 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "data_dictionary.json",
             {
-                "schema_version": "1.1.0",
+                "schema_version": "1.2.0",
                 "goal_id": "goal-test",
                 "unit_of_analysis": "object x field x market x period",
                 "key_fields": ["object_type", "object_id", "field", "market", "period"],
@@ -144,11 +144,12 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "coverage_plan.json",
             {
-                "schema_version": "1.1.0",
+                "schema_version": "1.2.0",
                 "goal_id": "goal-test",
                 "dimensions": ["object", "field", "market", "source_class"],
                 "required_source_classes": ["official", "independent"],
                 "required_cells": ["CELL-001"],
+                "required_fields": [],
                 "completion_rule": "Every required cell has a terminal state",
             },
         )
@@ -172,6 +173,74 @@ class RuntimeTests(unittest.TestCase):
             invalid = run_script("validate_research_run.py", run_dir, check=False)
             self.assertNotEqual(0, invalid.returncode)
             self.assertIn("input_snapshot", invalid.stdout)
+
+    def test_field_contract_rejects_silent_scope_narrowing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            run_dir = Path(temp) / "run"
+            run_script(
+                "init_research_run.py",
+                "--output",
+                run_dir,
+                "--goal",
+                "Collect contracted listing fields",
+                "--decision-use",
+                "Verify field parity",
+                "--mode",
+                "structured-extraction",
+                "--depth",
+                "standard",
+                "--goal-id",
+                "goal-fields",
+                "--run-id",
+                "run-fields",
+                "--required-field",
+                "price",
+                "--optional-field",
+                "seller",
+                "--excluded-field",
+                "orderable",
+            )
+            write_json(
+                run_dir / "data_dictionary.json",
+                {
+                    "schema_version": "1.2.0",
+                    "goal_id": "goal-fields",
+                    "unit_of_analysis": "listing x field x market x observation time",
+                    "key_fields": ["listing_id", "field", "market", "observed_at"],
+                    "fields": {"price": {}, "seller": {}},
+                },
+            )
+            write_json(
+                run_dir / "coverage_plan.json",
+                {
+                    "schema_version": "1.2.0",
+                    "goal_id": "goal-fields",
+                    "dimensions": ["listing", "field", "market"],
+                    "required_source_classes": ["official"],
+                    "required_cells": ["CELL-PRICE"],
+                    "required_fields": ["price"],
+                    "completion_rule": "Every required target-field cell has a terminal state",
+                },
+            )
+
+            narrowed = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, narrowed.returncode)
+            self.assertIn("extractor_output_fields missing required fields", narrowed.stdout)
+            self.assertIn("acceptance_fields missing required fields", narrowed.stdout)
+
+            contract_path = run_dir / "field_contract.json"
+            contract = json.loads(contract_path.read_text(encoding="utf-8"))
+            contract["extractor_output_fields"] = ["price", "seller"]
+            contract["acceptance_fields"] = ["price"]
+            write_json(contract_path, contract)
+            valid = run_script("validate_research_run.py", run_dir, "--strict")
+            self.assertEqual(0, json.loads(valid.stdout)["errors"])
+
+            contract["extractor_output_fields"].append("orderable")
+            write_json(contract_path, contract)
+            excluded = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, excluded.returncode)
+            self.assertIn("outside the contract", excluded.stdout)
 
     def test_merge_is_order_invariant_idempotent_and_current(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

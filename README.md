@@ -7,6 +7,7 @@ It is designed for research about businesses, companies, brands, channels, produ
 ## What it adds
 
 - A stable goal contract so retrieval failures cannot silently change the objective.
+- A cross-layer field contract that prevents required fields from disappearing between scope, extraction, merging, and acceptance.
 - Quick, standard, and exhaustive research depths; unclear depth is resolved before broad execution.
 - Separate coverage, evidence type, source strength, confidence, completeness, and currentness states.
 - A declared source universe with checked, no-confirmation, blocked, and unchecked boundaries.
@@ -15,8 +16,10 @@ It is designed for research about businesses, companies, brands, channels, produ
 - A two-pass discovery and extraction pipeline that increases unique valid records without sending every target through the most expensive route.
 - Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.
 - A reproducible collection funnel covering discovery, fetch, parse, extraction, valid-record yield, duplicates, unresolved targets, and retry recovery.
+- One-pass extraction of independently evidenced in-scope fields from expensive payloads, with reparse-before-refetch recovery.
 - Append-only JSONL observations with deterministic current views and retained conflicts.
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
+- Role-based agent, model, quota, and concurrency tiering driven by accepted yield rather than model prestige.
 - A conclusion-first output contract with stable claim, source, gap, blocker, conflict, and action IDs.
 - A learning-disposition gate that keeps one-off failures in run evidence, platform knowledge in project playbooks, deterministic defects in code/tests, and only cross-source invariants in the Skill.
 
@@ -79,8 +82,13 @@ python scripts/init_research_run.py `
   --goal "Map the requested commercial evidence" `
   --decision-use "Support a channel decision" `
   --mode coverage-sweep `
-  --depth standard
+  --depth standard `
+  --required-field price `
+  --optional-field seller `
+  --excluded-field orderable
 ```
+
+For schema 1.2 runs, complete `field_contract.json` with the extractor output fields and acceptance fields before broad execution. Strict validation rejects a required field that was silently omitted by either layer.
 
 Materialize observations while preventing silent backfill of current dynamic fields:
 
@@ -117,6 +125,7 @@ The repository test suite checks:
 - required Skill files and local reference links
 - safe run initialization
 - goal-contract drift rejection
+- cross-layer required, optional, and excluded field parity
 - batch-order invariance and idempotence
 - conflict retention and deterministic selection
 - prevention of stale dynamic-field backfill

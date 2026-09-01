@@ -116,6 +116,19 @@ def as_list(value: Any, label: str, errors: list[str]) -> list[Any]:
     return []
 
 
+def as_string_set(value: Any, label: str, errors: list[str]) -> set[str]:
+    items = as_list(value, label, errors)
+    strings: list[str] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{label}[{index}]: expected a non-empty string")
+            continue
+        strings.append(item)
+    for duplicate in duplicates(strings):
+        errors.append(f"{label}: duplicate field {duplicate!r}")
+    return set(strings)
+
+
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("run_directory")
@@ -141,6 +154,11 @@ def main() -> int:
     manifest = load_json(root / "run_manifest.json", errors)
     data_dictionary = load_json(root / "data_dictionary.json", errors)
     coverage_plan = load_json(root / "coverage_plan.json", errors)
+    field_contract_path = root / "field_contract.json"
+    requires_field_contract = version_at_least(manifest.get("schema_version"), (1, 2, 0))
+    if requires_field_contract and not field_contract_path.is_file():
+        errors.append("missing required file for schema >= 1.2.0: field_contract.json")
+    field_contract = load_json(field_contract_path, errors) if field_contract_path.is_file() else {}
     require(
         goal,
         {"schema_version", "goal_id", "goal", "decision_use", "mode", "depth", "in_scope", "out_of_scope", "deliverables", "must_preserve", "success_conditions", "stop_conditions", "assumptions", "as_of", "change_log"},
@@ -153,6 +171,13 @@ def main() -> int:
         "run_manifest.json",
         errors,
     )
+    if requires_field_contract:
+        require(
+            goal,
+            {"required_fields", "optional_fields", "excluded_fields"},
+            "goal_contract.json",
+            errors,
+        )
     attempts_path = root / "collection_attempts.jsonl"
     if version_at_least(manifest.get("schema_version"), (1, 1, 0)) and not attempts_path.is_file():
         errors.append("missing required file for schema >= 1.1.0: collection_attempts.jsonl")
@@ -165,12 +190,90 @@ def main() -> int:
         errors.append("goal_contract.json no longer matches run_manifest.json input_snapshot")
 
     require(data_dictionary, {"schema_version", "goal_id", "unit_of_analysis", "key_fields", "fields"}, "data_dictionary.json", errors)
-    require(coverage_plan, {"schema_version", "goal_id", "dimensions", "required_source_classes", "required_cells", "completion_rule"}, "coverage_plan.json", errors)
+    coverage_required = {"schema_version", "goal_id", "dimensions", "required_source_classes", "required_cells", "completion_rule"}
+    if requires_field_contract:
+        coverage_required.add("required_fields")
+    require(coverage_plan, coverage_required, "coverage_plan.json", errors)
     for name, value in (("data_dictionary.json", data_dictionary), ("coverage_plan.json", coverage_plan)):
         if value.get("schema_version") != manifest.get("schema_version"):
             errors.append(f"{name}: schema_version mismatch")
         if value.get("goal_id") != manifest.get("goal_id"):
             errors.append(f"{name}: goal_id mismatch")
+
+    required_fields: set[str] = set()
+    optional_fields: set[str] = set()
+    excluded_fields: set[str] = set()
+    if requires_field_contract and field_contract:
+        require(
+            field_contract,
+            {
+                "schema_version",
+                "goal_id",
+                "required_fields",
+                "optional_fields",
+                "excluded_fields",
+                "extractor_output_fields",
+                "acceptance_fields",
+            },
+            "field_contract.json",
+            errors,
+        )
+        if field_contract.get("schema_version") != manifest.get("schema_version"):
+            errors.append("field_contract.json: schema_version mismatch")
+        if field_contract.get("goal_id") != manifest.get("goal_id"):
+            errors.append("field_contract.json: goal_id mismatch")
+
+        goal_required = as_string_set(goal.get("required_fields"), "goal_contract.json.required_fields", errors)
+        goal_optional = as_string_set(goal.get("optional_fields"), "goal_contract.json.optional_fields", errors)
+        goal_excluded = as_string_set(goal.get("excluded_fields"), "goal_contract.json.excluded_fields", errors)
+        required_fields = as_string_set(field_contract.get("required_fields"), "field_contract.json.required_fields", errors)
+        optional_fields = as_string_set(field_contract.get("optional_fields"), "field_contract.json.optional_fields", errors)
+        excluded_fields = as_string_set(field_contract.get("excluded_fields"), "field_contract.json.excluded_fields", errors)
+        extractor_fields = as_string_set(field_contract.get("extractor_output_fields"), "field_contract.json.extractor_output_fields", errors)
+        acceptance_fields = as_string_set(field_contract.get("acceptance_fields"), "field_contract.json.acceptance_fields", errors)
+        coverage_fields = as_string_set(coverage_plan.get("required_fields"), "coverage_plan.json.required_fields", errors)
+
+        for left_name, left, right_name, right in (
+            ("required", required_fields, "optional", optional_fields),
+            ("required", required_fields, "excluded", excluded_fields),
+            ("optional", optional_fields, "excluded", excluded_fields),
+        ):
+            overlap = sorted(left & right)
+            if overlap:
+                errors.append(f"field_contract.json: {left_name} and {right_name} fields overlap: {overlap}")
+
+        for label, goal_fields, contract_fields in (
+            ("required", goal_required, required_fields),
+            ("optional", goal_optional, optional_fields),
+            ("excluded", goal_excluded, excluded_fields),
+        ):
+            if goal_fields != contract_fields:
+                errors.append(f"goal_contract.json and field_contract.json disagree on {label}_fields")
+
+        if coverage_fields != required_fields:
+            errors.append("coverage_plan.json.required_fields does not match field_contract.json.required_fields")
+
+        dictionary_fields_value = data_dictionary.get("fields")
+        if not isinstance(dictionary_fields_value, dict):
+            errors.append("data_dictionary.json.fields: expected an object")
+            dictionary_fields: set[str] = set()
+        else:
+            dictionary_fields = set(dictionary_fields_value)
+        missing_dictionary = sorted((required_fields | optional_fields) - dictionary_fields)
+        if missing_dictionary:
+            errors.append(f"data_dictionary.json.fields missing contracted fields: {missing_dictionary}")
+        excluded_dictionary = sorted(excluded_fields & dictionary_fields)
+        if excluded_dictionary:
+            errors.append(f"data_dictionary.json.fields contains excluded fields: {excluded_dictionary}")
+
+        allowed_fields = required_fields | optional_fields
+        for label, declared in (("extractor_output_fields", extractor_fields), ("acceptance_fields", acceptance_fields)):
+            missing_required = sorted(required_fields - declared)
+            if missing_required:
+                errors.append(f"field_contract.json.{label} missing required fields: {missing_required}")
+            outside_contract = sorted(declared - allowed_fields)
+            if outside_contract:
+                errors.append(f"field_contract.json.{label} contains fields outside the contract: {outside_contract}")
 
     sources = load_jsonl(root / "sources.jsonl", errors)
     collection_attempts = load_jsonl(attempts_path, errors) if attempts_path.is_file() else []
@@ -369,6 +472,8 @@ def main() -> int:
         "claims": len(claims),
         "current_rows": len(current),
         "conflicts": len(conflicts),
+        "required_fields": len(required_fields),
+        "optional_fields": len(optional_fields),
         "warnings": len(warnings),
         "errors": len(errors),
     }

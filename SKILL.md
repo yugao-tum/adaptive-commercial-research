@@ -35,14 +35,17 @@ Select the narrowest useful mode:
 10. Separate cheap discovery from expensive extraction. Canonicalize and deduplicate targets before rendering, browser interaction, OCR, or paid retrieval.
 11. Log every target-stage attempt append-only. Retry only after classifying the failure and changing a relevant condition; retain failed attempts when recovery succeeds.
 12. Preserve evidence semantics across route changes. Market, locale, currency, delivery context, identity scope, and session or login state must not change silently; diagnostic fallbacks with different semantics cannot populate the current evidence layer.
+13. Before scaling, reconcile required, optional, and excluded fields across the goal contract, data dictionary, extractor output, merge layer, and acceptance metrics. A terminal target is not evidence that every required field is complete.
+14. When an expensive retrieval already exposes several in-scope fields, extract every explicit field supported by that payload in the same pass, but create independent observations and never infer one field from another. Reparse preserved evidence before refetching.
+15. Use the least expensive currently validated capability that can meet the task's evidence and reasoning requirements. Reserve stronger agents for scope, ambiguous semantics, route recovery, conflicts, and QA; use deterministic code for deterministic transformations.
 
 ## Run the research
 
-1. Create a compact goal contract, data dictionary, source universe, and initial coverage matrix.
-2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale.
+1. Create a compact goal contract, field contract, data dictionary, source universe, and initial coverage matrix.
+2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale. Reconcile the field contract with the extractor and acceptance layer before the pilot.
 3. If project instructions name a local source or platform playbook, load only the relevant target, market, and page-type section. Record the referenced route version and treat every historical route as a prior, not current readiness.
-4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, stage success rates, precision, time, cost, duplicates, and blockers.
-5. Route by target field and source capability. Expand, switch, or stop a route from observed net yield, not advertised features, successful HTTP responses, or request counts.
+4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, required-field yield, stage success rates, precision, time, cost, duplicates, and blockers.
+5. Route by target field, source capability, and task complexity. Expand, switch, escalate, or stop a route from observed net yield, not advertised features, model prestige, successful HTTP responses, or request counts.
 6. Store sources, collection attempts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Use the scripts in `scripts/` when multiple batches or agents are involved.
 7. Classify material operational learning as run-only evidence, a project-playbook update, a deterministic code/test fix, or a Skill-maintenance candidate. Update an authorized project-local playbook before closeout when the evidence gate is met; do not self-modify an installed Skill during an ordinary research run.
 8. Apply quality gates before synthesis: coverage visibility, claim-to-source traceability, key stability, conflict retention, currentness, and output navigation.

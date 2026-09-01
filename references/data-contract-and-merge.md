@@ -9,6 +9,7 @@ The canonical machine layer is append-only JSONL plus versioned JSON contracts:
 | File | Purpose |
 |---|---|
 | `goal_contract.json` | Immutable decision use, scope, depth, deliverables, and stopping rules |
+| `field_contract.json` | Required, optional, and excluded fields plus extractor and acceptance coverage |
 | `run_manifest.json` | Run ID, schema version, mode, timestamps, input snapshot, route and parser versions |
 | `data_dictionary.json` | Unit of analysis, stable keys, field semantics, types, units, and currentness classes |
 | `coverage_plan.json` | Declared source universe, matrix dimensions, required cells, and completion rule |
@@ -22,6 +23,14 @@ The canonical machine layer is append-only JSONL plus versioned JSON contracts:
 | `conflicts.jsonl` | Competing values and selected resolution |
 
 CSV, spreadsheet, database, and narrative reports are derived views. They do not replace the canonical observations and provenance.
+
+## Field-contract parity
+
+For schema `1.2.0` and later, `goal_contract.json` and `field_contract.json` declare the same required, optional, and excluded field sets. Every required and optional field must exist in `data_dictionary.json`; excluded fields must not appear in extractor output or acceptance fields. Every required field must appear in both `extractor_output_fields` and `acceptance_fields` before broad execution.
+
+The parity check verifies declared interfaces, not the truthfulness of an implementation. Bind extractor declarations to a parser version and verify the pilot's actual observations and acceptance report before scaling. When a collector already retrieves evidence for an in-scope optional field, add a separate field observation rather than hiding it inside another field's excerpt.
+
+Target status and field status have different grains. Keep target-stage attempts in `collection_attempts.jsonl` and target-field outcomes in observations or field-scoped coverage cells. A target can be terminal while one or more required fields remain blocked or unobserved.
 
 ## Stable grain and keys
 
@@ -87,5 +96,7 @@ Do not silently carry forward an older dynamic value when the current run has no
 - recoverability: completed target-stage attempts and checkpoints are not replayed after restart
 - retry traceability: every recovered target retains the failed attempt and changed route or condition
 - metric reproducibility: collection funnel and route metrics rebuild from append-only attempts and observations
+- field-contract parity: required fields cannot disappear between goal, dictionary, extractor, and acceptance layers
+- terminalization separation: completing every target does not synthesize missing target-field observations
 
 Use `../scripts/merge_observations.py`, `../scripts/summarize_collection_run.py`, and `../scripts/validate_research_run.py` for the base implementation. Extend the schema only when a recurring field requires it; version the schema and add a regression case.

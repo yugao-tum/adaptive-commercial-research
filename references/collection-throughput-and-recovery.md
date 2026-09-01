@@ -11,6 +11,14 @@ Use a two-pass pipeline:
 
 Do not send every discovered URL directly to the most expensive route. Canonicalize URLs, strip tracking parameters, resolve known aliases, and deduplicate stable platform or listing IDs first. Use content hashes after retrieval to suppress mirrors and repeated templates while retaining provenance.
 
+## Extract once, decide per field
+
+Before a costly route is scaled, map which required and optional fields the same response, rendered region, export row, or authorized session can expose. If one successful retrieval contains several in-scope fields, parse them in the same pass when doing so is reliable and materially cheaper than revisiting the target.
+
+Each field still needs its own observation, evidence rule, missing state, and acceptance test. A price does not establish stock, a purchase control does not establish every variant's availability, and a seller label does not establish the contracting entity. Do not convert nearby text into a field merely because it was cheap to collect.
+
+Preserve the raw payload, relevant excerpt or selector, and parser version so a missing parser branch can be repaired by reprocessing stored evidence before any refetch. If the original evidence did not contain the field or did not preserve enough context to interpret it safely, classify that field as unobserved rather than inferring it.
+
 ## Build a coverage-expanding queue
 
 Partition the queue by source family, domain, page type, market or locale, and retrieval route. Give every target a stable `target_id`; give every bounded unit of work a `batch_id`.
@@ -58,6 +66,8 @@ Classify failure before retrying. An identical retry without a changed condition
 
 Cap retries by failure class. Route switches must preserve the same `target_id`, link to the prior attempt, and record what changed. Put terminal failures in a dead-letter or blocked queue with their exact reason so one source cannot monopolize workers.
 
+Keep adapter or wrapper status separate from content classification. If an outer tool reports an error while preserving parseable target evidence, retain both facts and apply an explicit, versioned precedence rule. Repair classification in deterministic parser code with a regression case; append the corrected attempt or observation rather than deleting the earlier record.
+
 ## Durable attempt ledger
 
 Write one append-only `collection_attempts.jsonl` row for every target-stage attempt. The grain is one target, one stage, one adapter call, and one attempt number. Required fields are defined in [data-contract-and-merge.md](data-contract-and-merge.md).
@@ -79,8 +89,10 @@ Report at least:
 - final unresolved targets by failure class
 - duplicate, empty, blocked, and rate-limited shares
 - route-level yield and success rate
+- required-field observations and completion by field
+- target terminalization separately from required-field completion
 
-Raw request count, total downloaded pages, and successful HTTP status alone do not demonstrate useful collection. Use `../scripts/summarize_collection_run.py` to derive comparable metrics from the attempt and observation ledgers.
+Raw request count, total downloaded pages, terminal target count, and successful HTTP status alone do not demonstrate useful collection. Use `../scripts/summarize_collection_run.py` to derive comparable metrics from the attempt and observation ledgers.
 
 ## Stop and switch rules
 
