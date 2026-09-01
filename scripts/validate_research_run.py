@@ -439,6 +439,9 @@ def main() -> int:
                 errors.append(f"{label}: cost must be a non-negative number")
         if "executor_class" in row and (not isinstance(row.get("executor_class"), str) or not row.get("executor_class")):
             errors.append(f"{label}: executor_class must be a non-empty string")
+        for field in ("provider_run_id", "provider_version", "billing_model"):
+            if field in row and (not isinstance(row.get(field), str) or not row.get(field)):
+                errors.append(f"{label}: {field} must be a non-empty string")
         retry_of = row.get("retry_of_attempt_id")
         if retry_of is not None:
             retry_links.append((str(attempt_id), str(retry_of), row["_line"]))

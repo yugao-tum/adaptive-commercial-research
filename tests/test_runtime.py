@@ -361,6 +361,9 @@ class RuntimeTests(unittest.TestCase):
                     "bytes_received": 100,
                     "executor_class": "local-test",
                     "route_id": "synthetic-route",
+                    "provider_run_id": "managed-run-1",
+                    "provider_version": "2026-08-test",
+                    "billing_model": "per-record",
                 }
                 if status not in {"success", "partial", "skipped_duplicate"}:
                     row["error_category"] = status
@@ -392,6 +395,13 @@ class RuntimeTests(unittest.TestCase):
             self.complete_contract_files(run_dir)
             validated = run_script("validate_research_run.py", run_dir, "--strict")
             self.assertEqual(13, json.loads(validated.stdout)["collection_attempts"])
+            attempts[0]["provider_run_id"] = 123
+            write_jsonl(run_dir / "collection_attempts.jsonl", attempts)
+            invalid_provider = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, invalid_provider.returncode)
+            self.assertIn("provider_run_id must be a non-empty string", invalid_provider.stdout)
+            attempts[0]["provider_run_id"] = "managed-run-1"
+            write_jsonl(run_dir / "collection_attempts.jsonl", attempts)
             write_jsonl(
                 run_dir / "observations.jsonl",
                 [

@@ -54,7 +54,7 @@ Select the narrowest useful mode:
 ## Load details only when needed
 
 - For source classes, evidence strength, coverage states, object separation, and completeness tests, read [evidence-and-coverage.md](references/evidence-and-coverage.md).
-- For retrieval routes, readiness checks, project-local playbooks, route lifecycle, learning promotion, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
+- For retrieval routes, readiness checks, managed or black-box collector evaluation, project-local playbooks, route lifecycle, learning promotion, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
 - For high-volume collection, discovery-to-extraction funnels, adaptive batches, failure recovery, and success metrics, read [collection-throughput-and-recovery.md](references/collection-throughput-and-recovery.md).
 - For canonical JSONL records, stable keys, deterministic merge rules, and batch invariance, read [data-contract-and-merge.md](references/data-contract-and-merge.md).
 - For independent work lanes, ownership leases, result packages, single-writer rules, and recovery from blocked tasks, read [parallel-research-protocol.md](references/parallel-research-protocol.md) only when parallel work is justified.

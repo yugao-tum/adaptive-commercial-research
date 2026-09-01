@@ -49,6 +49,8 @@ Pilot each materially different domain and page type with a small, diverse batch
 
 Record a terminal field-scoped coverage state even when a pilot produces no observation. Before scale-up, run `../scripts/validate_pilot_output.py --strict` on the pilot partition. A declared extractor interface is not accepted until actual `checked_hit` cells have observations and every selected target-field cell has a consistent terminal outcome.
 
+When the candidate route is a managed or black-box collector, use the diagnostic cohort and transferability rules in [tool-routing-and-readiness.md](tool-routing-and-readiness.md). A successful paid run validates only the observed service boundary; it does not prove source-code access, local reproducibility, or that the provider's network capability can be copied.
+
 Set concurrency per host and adapter, not globally. Increase batch size or concurrency gradually while success and latency remain stable. On rate limits, rising timeouts, challenge pages, or partial-result loss, honor server guidance, reduce concurrency, shrink batches, and resume from the last durable checkpoint. Do not use a fixed concurrency value as a universal rule.
 
 Persist each completed page, cursor, or bounded batch before requesting the next one. A restarted run must be able to identify completed targets, pending targets, the last cursor, and retry history without replaying successful work.

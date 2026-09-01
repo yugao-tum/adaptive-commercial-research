@@ -76,6 +76,7 @@ Each row must include:
 - optional non-negative `valid_record_count` and `new_record_count`
 - optional non-negative `elapsed_ms`, `cost`, `input_tokens`, `output_tokens`, and `bytes_received`
 - optional `route_id` and `executor_class` for comparable resource allocation
+- optional `provider_run_id`, `provider_version`, and `billing_model` when a managed or black-box route exposes them
 - `error_category` and optional stable error fingerprint whenever the result is a failure
 
 Keep the same `target_id` across retries and route changes. `attempt_id` is globally unique. A later success does not replace a failed row. `batch_id` groups a bounded, resumable unit but is never an identity key for the target or observation.

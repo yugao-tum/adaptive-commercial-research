@@ -12,6 +12,7 @@ It is designed for research about businesses, companies, brands, channels, produ
 - Separate coverage, evidence type, source strength, confidence, completeness, and currentness states.
 - A declared source universe with checked, no-confirmation, blocked, and unchecked boundaries.
 - Runtime acceptance tests for tools instead of treating installation as readiness.
+- A bounded black-box collector protocol that separates observable service behavior, private implementation, managed environment advantages, reuse rights, and local capability gaps.
 - Optional project-local source and platform playbooks that remain historical priors until a current pilot validates them.
 - A two-pass discovery and extraction pipeline that increases unique valid records without sending every target through the most expensive route.
 - Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.

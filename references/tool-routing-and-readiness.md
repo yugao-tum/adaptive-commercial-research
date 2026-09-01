@@ -45,6 +45,40 @@ Before declaring a route ready in the current run, verify the smallest relevant 
 
 A version command, successful installer, visible GUI, configured connector, or historical success is not runtime acceptance. Store `last_verified_at`, target type, and actual result state.
 
+## Evaluate managed and black-box collectors
+
+A publicly listed or callable collector is not necessarily open source, locally reproducible, or licensed for copying. Before treating a managed crawler, hosted extraction service, or opaque API as reusable technology, separate five layers:
+
+| Layer | What may be learned from a bounded run | What must not be assumed |
+|---|---|---|
+| interface | accepted inputs, output schema, pagination controls, limits, and error contract | undocumented inputs remain stable |
+| observable behavior | runtime signatures, request ordering, retries, fallbacks, queue behavior, timing, and itemized charges when exposed | logs reveal every request header, selector, cookie, or decision |
+| implementation | exposed source files, dependency metadata, parser behavior, and version identifiers | a public service exposes its private source, selectors, or fingerprint logic |
+| execution environment | geographic route, session behavior, durable storage, queueing, or managed network capability when evidenced | copying wrapper code reproduces the provider's network, proxy pool, or reputation |
+| reuse rights | license, repository terms, or an explicit permission | the right to run a service grants the right to copy its implementation |
+
+Locate the earliest failing stage before adding tools or rewriting code. The following are diagnostic inferences, not automatic proof:
+
+| Observed boundary | Likely capability gap to test next |
+|---|---|
+| a known-good target yields no relevant payload before parsing | reachability, egress, geography, session, or managed runtime |
+| a relevant payload arrives but contracted fields present in the payload are not emitted | parser, selector, normalization, or schema contract |
+| exact targets work but page two, cursors, or deep listings do not progress | discovery or pagination control |
+| records appear but restart loses work or repeats accepted targets | queue durability, checkpointing, identity, or merge logic |
+| output is valid but cost or latency rises sharply with depth | route economics, concurrency, optional expansion, or source limits |
+
+Use one diagnostic cohort instead of an unbounded trial. Include known-good exact targets, a listing or search entry, a second-page or cursor case, and a hard or negative case under the same declared market and field contract. Set explicit record, time, and cost ceilings; disable expensive optional expansions unless they are themselves under evaluation. Preserve the provider run identifier, version, input, output, logs, queue or cursor evidence, route class when exposed, and itemized cost without recording credentials.
+
+Accept the route only after checking identity precision, required-field yield, pagination progress, duplicate or loss behavior, resume semantics, and actual cost per accepted record. Then choose deliberately:
+
+- exposed source with compatible license: adapt it with provenance and tests
+- observable interface without reusable source rights: implement against the interface or perform a clean-room rewrite; do not copy private behavior
+- stable black-box output with acceptable economics: keep it as a versioned upstream adapter while retaining local validation, merge, and QA ownership
+- provider-only environment advantage: record that the missing capability is environmental rather than claiming that wrapper code will reproduce it locally
+- failed identity, pagination, recovery, or cost gate: do not scale
+
+Launching a paid run, creating an account, or consuming external credits requires the corresponding user authorization. Keep tokens in a credential store or environment variable, never in the prompt, run ledger, fixture, or Skill.
+
 ## Project-local route knowledge
 
 A project may maintain a source- or platform-specific playbook. It is a long-lived operational prior, not a second copy of this Skill and not evidence that a route is ready now.
