@@ -39,15 +39,16 @@ Select the narrowest useful mode:
 14. When an expensive retrieval already exposes several in-scope fields, extract every explicit field supported by that payload in the same pass, but create independent observations and never infer one field from another. Reparse preserved evidence before refetching.
 15. Use the least expensive currently validated capability that can meet the task's evidence and reasoning requirements. Reserve stronger agents for scope, ambiguous semantics, route recovery, conflicts, and QA; use deterministic code for deterministic transformations.
 16. Distinguish child-agent delegation, external CLI or helper-Skill dispatch, native tool calls, deterministic code, and request concurrency. For `standard` or `exhaustive` work, assess these runner classes before broad execution: when at least two independent lanes are ready, delegate a child lane when available and authorized, or record the concrete exception. Threads and concurrent requests do not count as agent delegation; merely listing an installed CLI does not count as dispatch.
+17. Keep completeness and throughput in one feedback loop. Audit discovery boundaries separately from target-field coverage, then choose each next batch from unresolved required cells, source-family fairness, current-run route yield, retry state, and active leases. Do not let a high-yield route starve a required low-yield source family, and do not keep blocked or exhausted work in the runnable queue.
 
 ## Run the research
 
-1. Create a compact goal contract, field contract, data dictionary, and declared source universe. For matrix-scale collection, use the planner to materialize stable targets, target-field cells, and partitions before retrieval. For `standard` or `exhaustive` work, also complete the coordination and external-executor decisions in the run manifest before broad retrieval.
+1. Create a compact goal contract, field contract, data dictionary, and declared source universe. For matrix-scale collection, use the planner to materialize stable targets, target-field cells, route candidates, discovery lineage, and partitions before retrieval. For `standard` or `exhaustive` work, also complete the coordination, discovery-control, and external-executor decisions in the run manifest before broad retrieval.
 2. Normalize aliases and define the unit of analysis and stable keys before collecting at scale. Reconcile the field contract with the extractor and acceptance layer before the pilot.
 3. If project instructions name a local source or platform playbook, load only the relevant target, market, and page-type section. Record the referenced route version and treat every historical route as a prior, not current readiness.
 4. Run a small, diverse pilot across the hardest source and page types. Measure unique valid-record yield, required-field yield, stage success rates, precision, time, cost, duplicates, and blockers. Validate real target-field outcomes before expanding the queue.
-5. Route by target field, source capability, and task complexity. Expand, switch, escalate, or stop a route from observed net yield, not advertised features, model prestige, successful HTTP responses, or request counts.
-6. Store targets, sources, collection attempts, raw artifacts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Register reusable raw evidence before parsing so extractor fixes can reprocess it without refetching.
+5. Route by target field, source capability, and task complexity. During high-volume runs, select bounded next batches from the append-only control ledgers; expand, switch, escalate, or stop from observed net yield and coverage debt, not advertised features, model prestige, successful HTTP responses, or request counts.
+6. Store discovery-frontier events, targets, batch decisions, sources, collection attempts, raw artifacts, observations, coverage states, conflicts, and task results separately. Persist each completed page, cursor, or bounded batch before continuing. Register reusable raw evidence before parsing so extractor fixes can reprocess it without refetching.
 7. Classify material operational learning as run-only evidence, a project-playbook update, a deterministic code/test fix, or a Skill-maintenance candidate. Update an authorized project-local playbook before closeout when the evidence gate is met; do not self-modify an installed Skill during an ordinary research run.
 8. Apply quality gates before synthesis: coverage visibility, claim-to-source traceability, key stability, conflict retention, currentness, and output navigation.
 9. Deliver the answer using [output-contract.md](references/output-contract.md). Do not return a process diary or an unstructured bullet dump.
@@ -56,7 +57,7 @@ Select the narrowest useful mode:
 
 - For source classes, evidence strength, coverage states, object separation, and completeness tests, read [evidence-and-coverage.md](references/evidence-and-coverage.md).
 - For retrieval routes, readiness checks, managed or black-box collector evaluation, project-local playbooks, route lifecycle, learning promotion, fallbacks, access limits, and secret handling, read [tool-routing-and-readiness.md](references/tool-routing-and-readiness.md).
-- For high-volume collection, discovery-to-extraction funnels, adaptive batches, failure recovery, and success metrics, read [collection-throughput-and-recovery.md](references/collection-throughput-and-recovery.md).
+- For high-volume collection, auditable discovery frontiers, dynamic next-batch selection, failure recovery, and success metrics, read [collection-throughput-and-recovery.md](references/collection-throughput-and-recovery.md).
 - For canonical JSONL records, stable keys, deterministic merge rules, and batch invariance, read [data-contract-and-merge.md](references/data-contract-and-merge.md).
 - For child-agent triggers, runner-class separation, model capability tiers, ownership leases, result packages, single-writer rules, and recovery from blocked tasks, read [parallel-research-protocol.md](references/parallel-research-protocol.md) when multiple lanes, external executors, independent QA, or shared resources are in scope.
 - For optional routing to other installed skills, read [skill-integrations.md](references/skill-integrations.md) and load only the selected skill's full instructions.
@@ -65,7 +66,9 @@ Select the narrowest useful mode:
 ## Deterministic helpers
 
 - `scripts/init_research_run.py` creates a versioned run package after scope and depth are resolved.
+- `scripts/record_discovery_frontier.py` appends auditable enumeration, pagination, cursor, saturation, and blocker events for the declared source universe.
 - `scripts/plan_collection.py` expands bounded dimension templates into canonical targets, target-field coverage cells, and stable shards.
+- `scripts/select_next_batch.py` chooses and records the next bounded batch from required-field debt, source-family fairness, current route yield, retry caps, and active leases.
 - `scripts/register_raw_artifact.py` stores authorized raw payloads by content hash while retaining target and attempt provenance.
 - `scripts/validate_pilot_output.py` verifies that real pilot targets have consistent field observations and terminal coverage states.
 - `scripts/merge_observations.py` builds a deterministic current view while retaining conflicts.

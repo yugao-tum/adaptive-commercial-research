@@ -12,11 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-SCHEMA_VERSION = "1.4.0"
+SCHEMA_VERSION = "1.5.0"
 JSONL_FILES = (
     "sources.jsonl",
+    "discovery_frontier.jsonl",
     "target_queue.jsonl",
     "collection_attempts.jsonl",
+    "batch_decisions.jsonl",
     "coverage.jsonl",
     "observations.jsonl",
     "raw_artifacts.jsonl",
@@ -145,6 +147,15 @@ def main() -> int:
             "child_agent_reason": None,
             "external_executor_decisions": [],
         },
+        "collection_control": {
+            "discovery_assessed": False,
+            "discovery_mode": "unassessed",
+            "discovery_reason": None,
+            "selector_policy": "coverage_first_yield_adaptive",
+            "max_attempts_per_target_route": 2,
+            "max_task_escalations": 2,
+            "exploration_slots": 1,
+        },
         "route_registry_version": None,
         "parser_versions": {},
         "status": "initialized",
@@ -174,8 +185,10 @@ def main() -> int:
         "dimensions": [],
         "required_source_classes": [],
         "required_cells": [],
+        "required_frontier_ids": [],
         "required_fields": field_groups["required"],
         "completion_rule": None,
+        "discovery_completion_rule": None,
     }
 
     write_json(output / "goal_contract.json", contract)

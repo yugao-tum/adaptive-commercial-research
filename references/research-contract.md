@@ -67,12 +67,13 @@ When the user adds or removes a field, record one authorized contract change and
 
 Completion is relative to the declared source universe. A run may be complete even with blocked or unresolved cells if those states are explicit and the agreed stopping conditions are met.
 
-Track two independent completion axes:
+Track three independent completion axes:
 
+- **discovery completion:** every required bounded plan or frontier has a terminal enumeration or blocker state
 - **target terminalization:** every target has a final success, no-confirmation, blocked, invalid, or other agreed terminal state
 - **field completion:** every required target-field cell is populated or has an explicit allowed terminal state
 
-Do not report “all fields complete” merely because every target was attempted or terminalized. Acceptance should show required-field coverage separately from route completion, with optional-field yield reported as useful enrichment rather than a hidden success criterion.
+Do not report “all fields complete” merely because every target was attempted or terminalized, and do not report “full collection” merely because all currently known targets were processed while discovery frontiers remain open. Acceptance should show discovery, target, and required-field completion separately, with optional-field yield reported as useful enrichment rather than a hidden success criterion.
 
 For standard work, stop broadening when key claims have adequate evidence, all high-priority source families have a state, material contradictions are exposed, and another route is unlikely to change the decision.
 
@@ -87,6 +88,7 @@ Classify failures before changing the Skill or run:
 | target | Wrong objective, scope, or deliverable | Goal contract or explicit user decision |
 | schema | Mixed objects, ambiguous field, unstable key | Data dictionary or schema reference |
 | route | Page type or source path does not yield the field | Route registry or tool reference |
+| allocation | Productive routes starve required source families, or blocked work keeps retrying | Batch selector policy, frontier ledger, or retry state machine |
 | merge | Order-dependent or stale materialization | Deterministic merge script and regression test |
 | coordination | Duplicate ownership, blocking dependency | Task protocol |
 | presentation | Correct evidence is hard to locate | Output contract |

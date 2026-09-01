@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 
 
-PLANNER_VERSION = "1.0.0"
+PLANNER_VERSION = "1.1.0"
 TRACKING_KEYS = {"fbclid", "gclid", "mc_cid", "mc_eid"}
 TRACKING_PREFIXES = ("utm_",)
 
@@ -211,6 +211,31 @@ def main() -> int:
         priority = template.get("priority", 100)
         if not isinstance(priority, int) or isinstance(priority, bool):
             raise ValueError(f"template {template_id}.priority must be an integer")
+        route_id = template.get("route_id", "unassigned")
+        if not isinstance(route_id, str) or not route_id.strip():
+            raise ValueError(f"template {template_id}.route_id must be a non-empty string")
+        route_id = route_id.strip()
+        route_candidates = string_list(
+            template.get("route_candidates", [route_id]),
+            f"template {template_id}.route_candidates",
+        )
+        route_candidates = [route_id, *sorted(route for route in route_candidates if route != route_id)]
+        frontier_ids = sorted(
+            string_list(
+                template.get("frontier_ids", []),
+                f"template {template_id}.frontier_ids",
+            )
+        )
+        page_type = template.get("page_type", "unknown")
+        source_class = template.get("source_class", "unknown")
+        target_type = template.get("target_type", "source_target")
+        for label, value in (
+            ("page_type", page_type),
+            ("source_class", source_class),
+            ("target_type", target_type),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"template {template_id}.{label} must be a non-empty string")
 
         combinations = itertools.product(*(axes[name] for name in vary_by))
         for combination in combinations:
@@ -231,11 +256,14 @@ def main() -> int:
             if not set(identity_axes) <= set(dimensions):
                 raise ValueError(f"template {template_id}: identity_axes must be dimensions")
             identity = {
-                "target_type": template.get("target_type", "source_target"),
-                "route_id": template.get("route_id"),
+                "target_type": target_type,
                 "locator": locator,
                 "dimensions": {key: dimensions[key] for key in sorted(identity_axes)},
             }
+            if version_at_least(manifest.get("schema_version"), (1, 5, 0)):
+                identity.update({"page_type": page_type, "source_class": source_class})
+            else:
+                identity["route_id"] = route_id
             target_id = stable_id("T", identity)
             shard_id = int(hashlib.sha256(target_id.encode("utf-8")).hexdigest(), 16) % shard_count
             row = {
@@ -243,10 +271,12 @@ def main() -> int:
                 "run_id": manifest.get("run_id"),
                 "goal_id": goal.get("goal_id"),
                 "template_id": template_id,
-                "target_type": template.get("target_type", "source_target"),
-                "page_type": template.get("page_type", "unknown"),
-                "source_class": template.get("source_class", "unknown"),
-                "route_id": template.get("route_id", "unassigned"),
+                "target_type": target_type,
+                "page_type": page_type,
+                "source_class": source_class,
+                "route_id": route_id,
+                "route_candidates": route_candidates,
+                "frontier_ids": frontier_ids,
                 "locator": locator,
                 "original_locator": original_locator,
                 "dimensions": dimensions,

@@ -68,6 +68,22 @@ Record the selected `model_tier`, reasoning tier, and exact executor ID in each 
 
 Start with a representative sample for each proposed tier. Promote routine lanes only when their accepted field yield and precision are adequate; escalate exceptions rather than the whole queue. Downgrade or stop a tier when retry recovery or net-new yield is poor.
 
+## Prompt, model, and reasoning escalation
+
+For schema `1.5.0` and later, version every child-agent task contract and classify acceptance before escalation. Diagnose in this order:
+
+1. missing evidence, unavailable tool, blocked route, or runtime failure;
+2. ambiguous partition, output schema, acceptance metric, or stopping condition;
+3. skipped reasoning steps despite sufficient evidence;
+4. repeated semantic, identity, or conflict errors after the contract is clear; and
+5. coordination or resource-lease conflict.
+
+Fix evidence, route, runtime, partition, or prompt-contract defects at their own layer. Increase reasoning one tier only for omitted multi-step analysis or premature conclusions. Increase model capability only when sufficient inputs and a clear contract still produce repeated semantic errors on representative samples. Change one capability variable per pilot when attribution matters; otherwise the controller cannot tell why performance changed.
+
+Record `prompt_version`, `acceptance_result`, `failure_class`, `escalated_from_task_id`, `escalation_step`, and `max_escalations`. A partial or failed parent may create one exception task on the same goal snapshot and partition, but the child must change its prompt version, model tier, reasoning tier, or executor. Do not describe an unchanged retry as escalation. Stop or return the exception after the run-level cap; do not promote the whole queue because one case failed.
+
+Keep the child prompt as a compact task contract: task and goal IDs, immutable snapshot, one partition, permitted evidence and tools, expected output schema, acceptance metric, stop condition, escalation condition, side-effect boundary, and resource leases. Replace superseded rules and increment `prompt_version`; do not append full conversation history or every prior exception to the prompt.
+
 ## Partition rules
 
 Partitions must be mutually exclusive and collectively traceable. Split by one or more stable dimensions:

@@ -31,6 +31,17 @@ ACTIVE_TASK_STATES = {"pending", "leased"}
 RUNNER_CLASSES = {"lead", "child_agent", "external_cli", "native_tool", "deterministic_code"}
 MODEL_TIERS = {"strong_reasoning", "balanced", "low_cost"}
 REASONING_TIERS = {"low", "medium", "high"}
+TASK_ACCEPTANCE_RESULTS = {"unassessed", "passed", "partial", "failed"}
+TASK_FAILURE_CLASSES = {
+    "prompt_contract",
+    "input_evidence",
+    "tool_route",
+    "reasoning_depth",
+    "model_capability",
+    "partition_conflict",
+    "runtime",
+    "other",
+}
 CHILD_AGENT_DECISIONS = {
     "unassessed",
     "delegated",
@@ -71,6 +82,31 @@ COLLECTION_STATUSES = {
     "interrupted",
 }
 COLLECTION_NON_FAILURE_STATES = {"success", "partial", "skipped_duplicate"}
+DISCOVERY_MODES = {"unassessed", "bounded_plan", "frontier_ledger", "not_applicable"}
+DISCOVERY_METHODS = {
+    "bounded_plan",
+    "sitemap",
+    "feed",
+    "category",
+    "pagination",
+    "cursor",
+    "site_search",
+    "query",
+    "identifier_enumeration",
+    "registry",
+    "api",
+    "export",
+    "other",
+}
+FRONTIER_STATES = {"pending", "active", "paused", "exhausted", "blocked"}
+TERMINAL_FRONTIER_STATES = {"exhausted", "blocked"}
+BATCH_STOP_DECISIONS = {
+    "continue",
+    "coverage_complete",
+    "discovery_incomplete",
+    "blocked_only",
+    "no_eligible_targets",
+}
 
 
 def stable_hash(value: object) -> str:
@@ -218,9 +254,13 @@ def main() -> int:
         errors.append("missing required file for schema >= 1.1.0: collection_attempts.jsonl")
     requires_control_plane = version_at_least(manifest.get("schema_version"), (1, 3, 0))
     requires_execution_routing = version_at_least(manifest.get("schema_version"), (1, 4, 0))
+    requires_adaptive_control = version_at_least(manifest.get("schema_version"), (1, 5, 0))
     for name in ("target_queue.jsonl", "raw_artifacts.jsonl"):
         if requires_control_plane and not (root / name).is_file():
             errors.append(f"missing required file for schema >= 1.3.0: {name}")
+    for name in ("discovery_frontier.jsonl", "batch_decisions.jsonl"):
+        if requires_adaptive_control and not (root / name).is_file():
+            errors.append(f"missing required file for schema >= 1.5.0: {name}")
     for field in ("schema_version", "goal_id", "mode", "depth", "as_of"):
         if goal.get(field) != manifest.get(field):
             errors.append(f"goal_contract.json and run_manifest.json disagree on {field}")
@@ -230,6 +270,7 @@ def main() -> int:
         errors.append("goal_contract.json no longer matches run_manifest.json input_snapshot")
 
     coordination: dict[str, Any] = {}
+    collection_control: dict[str, Any] = {}
     selected_external_attempts: list[tuple[str, str]] = []
     selected_external_ids: set[str] = set()
     if requires_execution_routing:
@@ -298,10 +339,56 @@ def main() -> int:
                 if state == "selected" and isinstance(decision.get("executor_id"), str):
                     selected_external_ids.add(decision["executor_id"])
 
+    if requires_adaptive_control:
+        if not isinstance(manifest.get("collection_control"), dict):
+            errors.append("run_manifest.json.collection_control must be an object for schema >= 1.5.0")
+        else:
+            collection_control = manifest["collection_control"]
+            require(
+                collection_control,
+                {
+                    "discovery_assessed",
+                    "discovery_mode",
+                    "discovery_reason",
+                    "selector_policy",
+                    "max_attempts_per_target_route",
+                    "max_task_escalations",
+                    "exploration_slots",
+                },
+                "run_manifest.json.collection_control",
+                errors,
+            )
+            if not isinstance(collection_control.get("discovery_assessed"), bool):
+                errors.append("run_manifest.json.collection_control.discovery_assessed must be a boolean")
+            elif not collection_control.get("discovery_assessed"):
+                warnings.append("discovery boundary and control policy have not been assessed")
+            discovery_mode = collection_control.get("discovery_mode")
+            if discovery_mode not in DISCOVERY_MODES:
+                errors.append(f"run_manifest.json.collection_control has invalid discovery_mode {discovery_mode!r}")
+            if discovery_mode in {"bounded_plan", "not_applicable"}:
+                reason = collection_control.get("discovery_reason")
+                if not isinstance(reason, str) or not reason.strip():
+                    errors.append(f"discovery_mode {discovery_mode!r} requires discovery_reason")
+            policy = collection_control.get("selector_policy")
+            if not isinstance(policy, str) or not policy.strip():
+                errors.append("run_manifest.json.collection_control.selector_policy must be a non-empty string")
+            for field, minimum in (
+                ("max_attempts_per_target_route", 1),
+                ("max_task_escalations", 0),
+                ("exploration_slots", 0),
+            ):
+                value = collection_control.get(field)
+                if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                    errors.append(
+                        f"run_manifest.json.collection_control.{field} must be an integer >= {minimum}"
+                    )
+
     require(data_dictionary, {"schema_version", "goal_id", "unit_of_analysis", "key_fields", "fields"}, "data_dictionary.json", errors)
     coverage_required = {"schema_version", "goal_id", "dimensions", "required_source_classes", "required_cells", "completion_rule"}
     if requires_field_contract:
         coverage_required.add("required_fields")
+    if requires_adaptive_control:
+        coverage_required.update({"required_frontier_ids", "discovery_completion_rule"})
     require(coverage_plan, coverage_required, "coverage_plan.json", errors)
     for name, value in (("data_dictionary.json", data_dictionary), ("coverage_plan.json", coverage_plan)):
         if value.get("schema_version") != manifest.get("schema_version"):
@@ -385,8 +472,10 @@ def main() -> int:
                 errors.append(f"field_contract.json.{label} contains fields outside the contract: {outside_contract}")
 
     sources = load_jsonl(root / "sources.jsonl", errors)
+    frontiers = load_jsonl(root / "discovery_frontier.jsonl", errors) if (root / "discovery_frontier.jsonl").is_file() else []
     targets = load_jsonl(root / "target_queue.jsonl", errors) if (root / "target_queue.jsonl").is_file() else []
     collection_attempts = load_jsonl(attempts_path, errors) if attempts_path.is_file() else []
+    batch_decisions = load_jsonl(root / "batch_decisions.jsonl", errors) if (root / "batch_decisions.jsonl").is_file() else []
     coverage = load_jsonl(root / "coverage.jsonl", errors)
     observations = load_jsonl(root / "observations.jsonl", errors)
     raw_artifacts = load_jsonl(root / "raw_artifacts.jsonl", errors) if (root / "raw_artifacts.jsonl").is_file() else []
@@ -408,6 +497,134 @@ def main() -> int:
         if row.get("source_id") in source_ids:
             errors.append(f"{label}: duplicate source_id {row.get('source_id')!r}")
         source_ids.add(row.get("source_id"))
+
+    frontier_event_ids: set[str] = set()
+    frontier_ids: set[str] = set()
+    frontier_identity: dict[str, dict[str, Any]] = {}
+    latest_frontiers: dict[str, dict[str, Any]] = {}
+    frontier_parent_links: list[tuple[str, str, int]] = []
+    for row in frontiers:
+        label = f"discovery_frontier.jsonl:{row['_line']}"
+        require(
+            row,
+            {
+                "frontier_event_id",
+                "frontier_id",
+                "run_id",
+                "goal_id",
+                "source_class",
+                "discovery_method",
+                "entrypoint",
+                "dimensions",
+                "query",
+                "alias",
+                "market",
+                "parent_frontier_id",
+                "state",
+                "cursor",
+                "event_at",
+                "new_target_count",
+                "duplicate_target_count",
+                "invalid_target_count",
+                "end_reason",
+                "blocker_reason",
+            },
+            label,
+            errors,
+        )
+        event_id = row.get("frontier_event_id")
+        frontier_id = row.get("frontier_id")
+        if not isinstance(event_id, str) or not event_id:
+            errors.append(f"{label}: frontier_event_id must be a non-empty string")
+        elif event_id in frontier_event_ids:
+            errors.append(f"{label}: duplicate frontier_event_id {event_id!r}")
+        frontier_event_ids.add(event_id)
+        if not isinstance(frontier_id, str) or not frontier_id:
+            errors.append(f"{label}: frontier_id must be a non-empty string")
+            continue
+        frontier_ids.add(frontier_id)
+        if row.get("run_id") != manifest.get("run_id"):
+            errors.append(f"{label}: run_id mismatch")
+        if row.get("goal_id") != manifest.get("goal_id"):
+            errors.append(f"{label}: goal_id mismatch")
+        for field in ("source_class", "discovery_method", "entrypoint", "event_at"):
+            if not isinstance(row.get(field), str) or not row.get(field):
+                errors.append(f"{label}: {field} must be a non-empty string")
+        if row.get("discovery_method") not in DISCOVERY_METHODS:
+            errors.append(f"{label}: invalid discovery_method {row.get('discovery_method')!r}")
+        if not isinstance(row.get("dimensions"), dict):
+            errors.append(f"{label}: dimensions must be an object")
+        state = row.get("state")
+        if state not in FRONTIER_STATES:
+            errors.append(f"{label}: invalid state {state!r}")
+        if state == "exhausted" and not row.get("end_reason"):
+            errors.append(f"{label}: exhausted frontier requires end_reason")
+        if state == "blocked" and not row.get("blocker_reason"):
+            errors.append(f"{label}: blocked frontier requires blocker_reason")
+        for field in ("new_target_count", "duplicate_target_count", "invalid_target_count"):
+            value = row.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        identity = {
+            field: row.get(field)
+            for field in ("source_class", "discovery_method", "entrypoint", "dimensions", "query", "alias", "market")
+        }
+        prior_identity = frontier_identity.setdefault(frontier_id, identity)
+        if prior_identity != identity:
+            errors.append(f"{label}: frontier identity changed across append-only events")
+        parent_id = row.get("parent_frontier_id")
+        if parent_id is not None:
+            frontier_parent_links.append((frontier_id, str(parent_id), row["_line"]))
+        order = (str(row.get("event_at") or ""), int(row.get("_line", 0)))
+        prior = latest_frontiers.get(frontier_id)
+        prior_order = (str(prior.get("event_at") or ""), int(prior.get("_line", 0))) if prior else None
+        if prior_order is None or order > prior_order:
+            latest_frontiers[frontier_id] = row
+
+    for frontier_id, parent_id, line_no in frontier_parent_links:
+        if parent_id not in frontier_ids:
+            errors.append(
+                f"discovery_frontier.jsonl:{line_no}: parent_frontier_id {parent_id!r} does not exist"
+            )
+        if parent_id == frontier_id:
+            errors.append(f"discovery_frontier.jsonl:{line_no}: frontier cannot parent itself")
+
+    if requires_adaptive_control:
+        required_frontier_ids = as_string_set(
+            coverage_plan.get("required_frontier_ids"),
+            "coverage_plan.json.required_frontier_ids",
+            errors,
+        )
+        unknown_frontiers = sorted(required_frontier_ids - frontier_ids)
+        if unknown_frontiers:
+            errors.append(f"coverage_plan.json.required_frontier_ids contains unknown IDs: {unknown_frontiers}")
+        discovery_mode = collection_control.get("discovery_mode")
+        if discovery_mode == "frontier_ledger" and not required_frontier_ids:
+            errors.append("frontier_ledger discovery_mode requires required_frontier_ids")
+        if discovery_mode == "frontier_ledger":
+            represented_source_classes = {
+                str(latest_frontiers[frontier_id].get("source_class"))
+                for frontier_id in required_frontier_ids
+                if frontier_id in latest_frontiers
+            }
+            required_source_classes = as_string_set(
+                coverage_plan.get("required_source_classes"),
+                "coverage_plan.json.required_source_classes",
+                errors,
+            )
+            missing_source_classes = sorted(required_source_classes - represented_source_classes)
+            if missing_source_classes:
+                errors.append(
+                    "required discovery frontiers do not represent source classes: "
+                    f"{missing_source_classes}"
+                )
+            unfinished = sorted(
+                frontier_id
+                for frontier_id in required_frontier_ids
+                if latest_frontiers.get(frontier_id, {}).get("state") not in TERMINAL_FRONTIER_STATES
+            )
+            if manifest.get("status") == "complete" and unfinished:
+                warnings.append(f"completed run has non-terminal discovery frontiers: {unfinished}")
 
     target_ids: set[str] = set()
     target_fields: dict[str, set[str]] = {}
@@ -434,7 +651,8 @@ def main() -> int:
                 "batch_id",
                 "planned_at",
                 "planner_version",
-            },
+            }
+            | ({"route_candidates", "frontier_ids"} if requires_adaptive_control else set()),
             label,
             errors,
         )
@@ -462,6 +680,14 @@ def main() -> int:
             errors.append(f"{label}: shard_id must be a non-negative integer")
         for field in fields:
             planned_cell_ids.add(stable_id("CELL", {"target_id": target_id, "field": field}))
+        if requires_adaptive_control:
+            route_candidates = as_string_set(row.get("route_candidates"), f"{label}.route_candidates", errors)
+            if row.get("route_id") not in route_candidates:
+                errors.append(f"{label}: route_candidates must include route_id")
+            target_frontiers = as_string_set(row.get("frontier_ids"), f"{label}.frontier_ids", errors)
+            unknown_target_frontiers = sorted(target_frontiers - frontier_ids)
+            if unknown_target_frontiers:
+                errors.append(f"{label}: frontier_ids contains unknown IDs: {unknown_target_frontiers}")
 
     if requires_control_plane:
         declared_cells = as_string_set(coverage_plan.get("required_cells"), "coverage_plan.json.required_cells", errors)
@@ -544,6 +770,133 @@ def main() -> int:
             )
         if attempt_id == retry_of:
             errors.append(f"collection_attempts.jsonl:{line_no}: attempt cannot retry itself")
+
+    batch_decision_ids: set[str] = set()
+    for row in batch_decisions:
+        label = f"batch_decisions.jsonl:{row['_line']}"
+        require(
+            row,
+            {
+                "decision_id",
+                "run_id",
+                "goal_id",
+                "input_snapshot",
+                "decided_at",
+                "selector_version",
+                "policy",
+                "ledger_snapshot",
+                "selected",
+                "candidate_count",
+                "selected_count",
+                "unresolved_required_cells",
+                "actionable_required_cells",
+                "open_frontier_ids",
+                "discovery_complete",
+                "exclusion_counts",
+                "stop_decision",
+            },
+            label,
+            errors,
+        )
+        decision_id = row.get("decision_id")
+        if not isinstance(decision_id, str) or not decision_id:
+            errors.append(f"{label}: decision_id must be a non-empty string")
+        elif decision_id in batch_decision_ids:
+            errors.append(f"{label}: duplicate decision_id {decision_id!r}")
+        batch_decision_ids.add(decision_id)
+        if row.get("run_id") != manifest.get("run_id"):
+            errors.append(f"{label}: run_id mismatch")
+        if row.get("goal_id") != manifest.get("goal_id"):
+            errors.append(f"{label}: goal_id mismatch")
+        if row.get("input_snapshot") != manifest.get("input_snapshot"):
+            errors.append(f"{label}: input_snapshot mismatch")
+        policy = row.get("policy")
+        if not isinstance(policy, dict):
+            errors.append(f"{label}: policy must be an object")
+            policy = {}
+        elif requires_adaptive_control and policy.get("name") != collection_control.get("selector_policy"):
+            errors.append(f"{label}: policy.name does not match collection_control.selector_policy")
+        ledger_snapshot = row.get("ledger_snapshot")
+        if not isinstance(ledger_snapshot, dict) or not ledger_snapshot:
+            errors.append(f"{label}: ledger_snapshot must be a non-empty object")
+            ledger_snapshot = {}
+        for name, digest in ledger_snapshot.items():
+            if not isinstance(name, str) or not isinstance(digest, str) or len(digest) != 64:
+                errors.append(f"{label}: ledger_snapshot must map file names to SHA-256 digests")
+                break
+        selected = as_list(row.get("selected"), f"{label}.selected", errors)
+        selected_target_ids: list[str] = []
+        selected_basis: list[dict[str, str]] = []
+        for index, item in enumerate(selected):
+            item_label = f"{label}.selected[{index}]"
+            if not isinstance(item, dict):
+                errors.append(f"{item_label}: expected an object")
+                continue
+            require(
+                item,
+                {
+                    "target_id",
+                    "partition_key",
+                    "source_class",
+                    "selected_route_id",
+                    "required_fields",
+                    "coverage_debt",
+                    "required_source_class",
+                    "static_priority",
+                    "route_metrics",
+                    "selection_reason",
+                },
+                item_label,
+                errors,
+            )
+            target_id = item.get("target_id")
+            if target_id not in target_ids:
+                errors.append(f"{item_label}: unknown target_id {target_id!r}")
+            if isinstance(target_id, str):
+                selected_target_ids.append(target_id)
+            route_id = item.get("selected_route_id")
+            if not isinstance(route_id, str) or not route_id:
+                errors.append(f"{item_label}: selected_route_id must be a non-empty string")
+            if isinstance(target_id, str) and isinstance(route_id, str):
+                selected_basis.append({"target_id": target_id, "selected_route_id": route_id})
+            if not isinstance(item.get("coverage_debt"), int) or isinstance(item.get("coverage_debt"), bool) or item.get("coverage_debt") < 1:
+                errors.append(f"{item_label}: coverage_debt must be a positive integer")
+            as_string_set(item.get("required_fields"), f"{item_label}.required_fields", errors)
+        for duplicate in duplicates(selected_target_ids):
+            errors.append(f"{label}: selected target appears more than once: {duplicate!r}")
+        selected_count = row.get("selected_count")
+        if selected_count != len(selected):
+            errors.append(f"{label}: selected_count does not match selected rows")
+        for field in ("candidate_count", "selected_count", "unresolved_required_cells", "actionable_required_cells"):
+            value = row.get(field)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                errors.append(f"{label}: {field} must be a non-negative integer")
+        open_frontier_ids = as_string_set(row.get("open_frontier_ids"), f"{label}.open_frontier_ids", errors)
+        unknown_open_frontiers = sorted(open_frontier_ids - frontier_ids)
+        if unknown_open_frontiers:
+            errors.append(f"{label}: open_frontier_ids contains unknown IDs: {unknown_open_frontiers}")
+        if not isinstance(row.get("discovery_complete"), bool):
+            errors.append(f"{label}: discovery_complete must be a boolean")
+        if not isinstance(row.get("exclusion_counts"), dict):
+            errors.append(f"{label}: exclusion_counts must be an object")
+        stop_decision = row.get("stop_decision")
+        if stop_decision not in BATCH_STOP_DECISIONS:
+            errors.append(f"{label}: invalid stop_decision {stop_decision!r}")
+        if stop_decision == "continue" and not selected:
+            errors.append(f"{label}: continue decision requires selected targets")
+        if stop_decision != "continue" and selected:
+            errors.append(f"{label}: terminal or blocked decision cannot select targets")
+        decision_basis = {
+            "run_id": row.get("run_id"),
+            "input_snapshot": row.get("input_snapshot"),
+            "selector_version": row.get("selector_version"),
+            "policy": policy,
+            "ledger_snapshot": ledger_snapshot,
+            "selected": selected_basis,
+            "stop_decision": stop_decision,
+        }
+        if isinstance(decision_id, str) and decision_id != stable_id("BDEC", decision_basis):
+            errors.append(f"{label}: decision_id does not match its deterministic decision basis")
 
     for executor_id, pilot_attempt_id in selected_external_attempts:
         if pilot_attempt_id not in collection_attempt_ids:
@@ -691,6 +1044,8 @@ def main() -> int:
     child_agent_task_count = 0
     external_task_ids: set[str] = set()
     task_runner_counts: Counter[str] = Counter()
+    tasks_by_id: dict[str, dict[str, Any]] = {}
+    task_escalation_links: list[tuple[str, str, int]] = []
     for row in tasks:
         label = f"tasks.jsonl:{row['_line']}"
         task_required = {"task_id", "goal_id", "input_snapshot", "partition_key", "owner", "status", "attempt"}
@@ -707,10 +1062,23 @@ def main() -> int:
                     "resource_lease_keys",
                 }
             )
+        if requires_adaptive_control:
+            task_required.update(
+                {
+                    "prompt_version",
+                    "acceptance_result",
+                    "failure_class",
+                    "escalated_from_task_id",
+                    "escalation_step",
+                    "max_escalations",
+                }
+            )
         require(row, task_required, label, errors)
         if row.get("task_id") in task_ids:
             errors.append(f"{label}: duplicate task_id {row.get('task_id')!r}")
         task_ids.add(row.get("task_id"))
+        if isinstance(row.get("task_id"), str):
+            tasks_by_id[row["task_id"]] = row
         if row.get("goal_id") != manifest.get("goal_id"):
             errors.append(f"{label}: goal_id mismatch")
         if row.get("input_snapshot") != manifest.get("input_snapshot"):
@@ -744,6 +1112,10 @@ def main() -> int:
                     errors.append(f"{label}: child_agent requires a valid model_tier")
                 if row.get("reasoning_tier") not in REASONING_TIERS:
                     errors.append(f"{label}: child_agent requires a valid reasoning_tier")
+                if requires_adaptive_control and (
+                    not isinstance(row.get("prompt_version"), str) or not row.get("prompt_version")
+                ):
+                    errors.append(f"{label}: child_agent requires a non-empty prompt_version")
             if runner_class == "external_cli":
                 executor_id = row.get("executor_id")
                 if isinstance(executor_id, str):
@@ -752,10 +1124,63 @@ def main() -> int:
                     errors.append(f"{label}: external_cli requires a valid readiness_state")
                 if row.get("status") in ACTIVE_TASK_STATES and row.get("readiness_state") not in {"ready", "degraded"}:
                     errors.append(f"{label}: active external_cli task is not runtime-ready")
+        if requires_adaptive_control:
+            acceptance_result = row.get("acceptance_result")
+            if acceptance_result not in TASK_ACCEPTANCE_RESULTS:
+                errors.append(f"{label}: invalid acceptance_result {acceptance_result!r}")
+            failure_class = row.get("failure_class")
+            if failure_class is not None and failure_class not in TASK_FAILURE_CLASSES:
+                errors.append(f"{label}: invalid failure_class {failure_class!r}")
+            if acceptance_result in {"partial", "failed"} and failure_class is None:
+                errors.append(f"{label}: partial or failed acceptance requires failure_class")
+            step = row.get("escalation_step")
+            maximum = row.get("max_escalations")
+            if not isinstance(step, int) or isinstance(step, bool) or step < 0:
+                errors.append(f"{label}: escalation_step must be a non-negative integer")
+            if not isinstance(maximum, int) or isinstance(maximum, bool) or maximum < 0:
+                errors.append(f"{label}: max_escalations must be a non-negative integer")
+            else:
+                run_maximum = collection_control.get("max_task_escalations")
+                if isinstance(run_maximum, int) and not isinstance(run_maximum, bool) and maximum > run_maximum:
+                    errors.append(f"{label}: max_escalations exceeds the run-level cap")
+            if isinstance(step, int) and isinstance(maximum, int) and step > maximum:
+                errors.append(f"{label}: escalation_step exceeds max_escalations")
+            parent_id = row.get("escalated_from_task_id")
+            if step == 0 and parent_id is not None:
+                errors.append(f"{label}: initial task cannot declare escalated_from_task_id")
+            if isinstance(step, int) and step > 0:
+                if not isinstance(parent_id, str) or not parent_id:
+                    errors.append(f"{label}: escalated task requires escalated_from_task_id")
+                elif isinstance(row.get("task_id"), str):
+                    task_escalation_links.append((row["task_id"], parent_id, row["_line"]))
     for value in duplicates(active_partitions):
         errors.append(f"multiple active task leases for partition_key {value!r}")
     for value in duplicates(active_resource_leases):
         errors.append(f"multiple active task leases for resource_lease_key {value!r}")
+    if requires_adaptive_control:
+        for task_id, parent_id, line_no in task_escalation_links:
+            task = tasks_by_id[task_id]
+            parent = tasks_by_id.get(parent_id)
+            label = f"tasks.jsonl:{line_no}"
+            if parent is None:
+                errors.append(f"{label}: escalated_from_task_id {parent_id!r} does not exist")
+                continue
+            if parent_id == task_id:
+                errors.append(f"{label}: task cannot escalate from itself")
+            if task.get("goal_id") != parent.get("goal_id") or task.get("input_snapshot") != parent.get("input_snapshot"):
+                errors.append(f"{label}: escalation changed goal or input snapshot")
+            if task.get("partition_key") != parent.get("partition_key"):
+                errors.append(f"{label}: escalation changed partition_key")
+            if task.get("escalation_step") != parent.get("escalation_step", 0) + 1:
+                errors.append(f"{label}: escalation_step must increment its parent by one")
+            if parent.get("acceptance_result") not in {"partial", "failed"}:
+                errors.append(f"{label}: parent task must have partial or failed acceptance before escalation")
+            changed = any(
+                task.get(field) != parent.get(field)
+                for field in ("prompt_version", "model_tier", "reasoning_tier", "executor_id")
+            )
+            if not changed:
+                errors.append(f"{label}: escalation did not change prompt, model, reasoning, or executor")
     if requires_execution_routing:
         child_decision = coordination.get("child_agent_decision")
         if child_decision == "delegated" and child_agent_task_count == 0:
@@ -823,14 +1248,19 @@ def main() -> int:
 
     summary = {
         "sources": len(sources),
+        "frontier_events": len(frontiers),
+        "frontiers": len(frontier_ids),
         "targets": len(targets),
         "collection_attempts": len(collection_attempts),
+        "batch_decisions": len(batch_decisions),
         "coverage_attempts": len(coverage),
         "observations": len(observations),
         "raw_artifacts": len(raw_artifacts),
         "tasks": len(tasks),
         "tasks_by_runner_class": dict(sorted(task_runner_counts.items())),
         "coordination_assessed": coordination.get("assessed") if coordination else None,
+        "discovery_assessed": collection_control.get("discovery_assessed") if collection_control else None,
+        "discovery_mode": collection_control.get("discovery_mode") if collection_control else None,
         "child_agent_decision": coordination.get("child_agent_decision") if coordination else None,
         "external_executors_considered": len(
             coordination.get("external_executor_decisions", [])

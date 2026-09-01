@@ -139,6 +139,8 @@ def main() -> int:
     coverage = load_jsonl(root / "coverage.jsonl", errors, required=False)
     raw_artifacts = load_jsonl(root / "raw_artifacts.jsonl", errors, required=False)
     tasks = load_jsonl(root / "tasks.jsonl", errors, required=False)
+    frontiers = load_jsonl(root / "discovery_frontier.jsonl", errors, required=False)
+    batch_decisions = load_jsonl(root / "batch_decisions.jsonl", errors, required=False)
 
     required = {
         "attempt_id",
@@ -400,9 +402,28 @@ def main() -> int:
         for row in latest_coverage.values()
     )
     tasks_by_runner_class = Counter(str(row.get("runner_class") or "unspecified") for row in tasks)
+    latest_frontiers: dict[str, dict[str, Any]] = {}
+    for row in frontiers:
+        frontier_id = str(row.get("frontier_id") or "")
+        if not frontier_id:
+            continue
+        order = (str(row.get("event_at") or ""), int(row.get("_line", 0)))
+        previous = latest_frontiers.get(frontier_id)
+        previous_order = (
+            str(previous.get("event_at") or ""),
+            int(previous.get("_line", 0)),
+        ) if previous else None
+        if previous_order is None or order > previous_order:
+            latest_frontiers[frontier_id] = row
+    frontier_states = Counter(str(row.get("state") or "unknown") for row in latest_frontiers.values())
+    latest_batch_decision = max(
+        batch_decisions,
+        key=lambda row: (str(row.get("decided_at") or ""), int(row.get("_line", 0))),
+        default=None,
+    )
 
     summary = {
-        "schema_version": "1.1.0",
+        "schema_version": "1.2.0",
         "run_id": manifest.get("run_id"),
         "batches": len({str(row["batch_id"]) for row in attempts}),
         "total_attempts": len(attempts),
@@ -456,6 +477,25 @@ def main() -> int:
             "decision": manifest.get("coordination"),
             "tasks": len(tasks),
             "tasks_by_runner_class": dict(sorted(tasks_by_runner_class.items())),
+        },
+        "control_loop": {
+            "policy": manifest.get("collection_control"),
+            "frontier_events": len(frontiers),
+            "frontiers": len(latest_frontiers),
+            "frontier_states": dict(sorted(frontier_states.items())),
+            "frontier_new_targets": sum(
+                int(row.get("new_target_count", 0))
+                for row in frontiers
+                if isinstance(row.get("new_target_count", 0), int)
+            ),
+            "frontier_duplicate_targets": sum(
+                int(row.get("duplicate_target_count", 0))
+                for row in frontiers
+                if isinstance(row.get("duplicate_target_count", 0), int)
+            ),
+            "batch_decisions": len(batch_decisions),
+            "latest_stop_decision": latest_batch_decision.get("stop_decision") if latest_batch_decision else None,
+            "latest_selected_count": latest_batch_decision.get("selected_count") if latest_batch_decision else None,
         },
         "batches_marginal_yield": batch_summary,
         "stages": stage_summary,

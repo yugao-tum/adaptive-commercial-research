@@ -18,6 +18,8 @@ It is designed for research about businesses, companies, brands, channels, produ
 - Adaptive per-host batches, classified failures, route-changing retries, durable checkpoints, and retained recovery history.
 - A reproducible collection funnel covering discovery, fetch, parse, extraction, valid-record yield, duplicates, unresolved targets, and retry recovery.
 - Deterministic target-universe expansion, canonical target-field cells, explicit exclusions, and stable shards.
+- Append-only discovery-frontier events that make pagination, cursor, saturation, and blocker boundaries auditable.
+- Deterministic next-batch selection from required-field debt, source-family fairness, observed route yield, retry caps, and active leases.
 - Content-addressed raw-evidence registration for reparse-before-refetch recovery.
 - Pilot output gates that test actual emitted fields rather than trusting extractor declarations.
 - Field-, batch-, route-, executor-, cost-, token-, latency-, and byte-level efficiency summaries.
@@ -26,6 +28,7 @@ It is designed for research about businesses, companies, brands, channels, produ
 - A single-lead parallel research protocol that prevents agents from competing for the master result.
 - A mandatory dispatch assessment that distinguishes child agents, external CLIs, native tools, deterministic code, and request concurrency, with explicit non-dispatch reasons.
 - Role-based agent, model, quota, and concurrency tiering driven by accepted yield rather than model prestige.
+- Versioned child-agent prompts and traceable prompt, reasoning, model, or executor escalation with run-level caps.
 - A conclusion-first output contract with stable claim, source, gap, blocker, conflict, and action IDs.
 - A learning-disposition gate that keeps one-off failures in run evidence, platform knowledge in project playbooks, deterministic defects in code/tests, and only cross-source invariants in the Skill.
 
@@ -73,6 +76,8 @@ adaptive-commercial-research/
 ├── scripts/
 │   ├── init_research_run.py
 │   ├── plan_collection.py
+│   ├── record_discovery_frontier.py
+│   ├── select_next_batch.py
 │   ├── register_raw_artifact.py
 │   ├── validate_pilot_output.py
 │   ├── merge_observations.py
@@ -109,6 +114,21 @@ python scripts/plan_collection.py .\run-example --spec .\collection-plan.json
 ```
 
 Schema 1.4 adds an execution-routing contract. Before broad `standard` or `exhaustive` work, complete `run_manifest.json.coordination`; selected child agents and external CLIs must resolve to real `tasks.jsonl` assignments, while non-selection retains a concrete reason.
+
+Schema 1.5 adds an adaptive collection loop. Complete `run_manifest.json.collection_control`, record cursor or pagination progress when the universe is not a deterministic matrix, and link project plan templates to their candidate routes and frontier IDs:
+
+```powershell
+python scripts/record_discovery_frontier.py .\run-example `
+  --source-class channel-native `
+  --method cursor `
+  --entrypoint "https://example.test/api/items" `
+  --state active `
+  --cursor PAGE_TOKEN
+
+python scripts/select_next_batch.py .\run-example --limit 20
+```
+
+The selector appends an idempotent decision package to `batch_decisions.jsonl`; it does not bypass task ownership or mutate the immutable target queue.
 
 Validate a completed pilot partition before scale-up:
 
@@ -162,6 +182,9 @@ The repository test suite checks:
 - content-addressed raw-payload deduplication and provenance
 - actual target-field pilot acceptance
 - field-level completion and marginal batch efficiency metrics
+- discovery-frontier identity, terminal-state, and source-family checks
+- deterministic, idempotent next-batch decisions with route-yield feedback
+- prompt/model/reasoning escalation lineage and caps
 
 Run it with:
 

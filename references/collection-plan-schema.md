@@ -23,6 +23,8 @@ Use this reference when `plan_collection.py` should expand a bounded matrix into
       "page_type": "search",
       "source_class": "channel-native",
       "route_id": "public-search-v1",
+      "route_candidates": ["public-search-v1", "rendered-search-v1"],
+      "frontier_ids": ["FRONTIER-example"],
       "locator_template": "https://example.test/{market}/search?q={alias}",
       "coverage_fields": ["title", "canonical_url"],
       "priority": 100
@@ -44,7 +46,9 @@ Use this reference when `plan_collection.py` should expand a bounded matrix into
 
 `coverage_fields` must be required or optional fields from `field_contract.json`. Excluded or undeclared fields are rejected before output. An exclusion is a partial exact match against `template_id` and dimensions.
 
-`priority` is an integer for downstream scheduling; the planner does not invent a universal priority scale. `shard_count` must remain fixed while active leases exist. Stable target hashing reproduces the same shard for the same target and shard count.
+`route_id` is the initial route. `route_candidates` lists distinct current-run routes that may retrieve the same immutable target; the initial route must be included. For schema `1.5.0` and later, route choice is deliberately excluded from `target_id`, so retries and switches keep the same target lineage. `frontier_ids` links the target to the discovery entrypoints that exposed or bounded it; every referenced frontier must exist in `discovery_frontier.jsonl`.
+
+`priority` is a static business priority, not a complete scheduling score. The adaptive selector combines it with unresolved required fields, source-family fairness, current-run route performance, retry state, and active leases. `shard_count` must remain fixed while active leases exist. Stable target hashing reproduces the same shard for the same target and shard count.
 
 ## Outputs and reruns
 

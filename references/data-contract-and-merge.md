@@ -14,8 +14,10 @@ The canonical machine layer is append-only JSONL plus versioned JSON contracts:
 | `data_dictionary.json` | Unit of analysis, stable keys, field semantics, types, units, and currentness classes |
 | `coverage_plan.json` | Declared source universe, matrix dimensions, required cells, and completion rule |
 | `sources.jsonl` | One source record per stable source ID |
+| `discovery_frontier.jsonl` | Append-only enumeration, pagination, cursor, saturation, and blocker events |
 | `target_queue.jsonl` | Immutable canonical target definitions, planned fields, priorities, and stable partitions |
 | `collection_attempts.jsonl` | Append-only target-stage attempts, retries, checkpoints, failure classes, and route yield |
+| `batch_decisions.jsonl` | Deterministic next-batch choices, ledger snapshots, exclusions, and stop decisions |
 | `coverage.jsonl` | Append-only attempts and states for coverage cells |
 | `observations.jsonl` | Append-only target-field observations |
 | `raw_artifacts.jsonl` | Raw-payload hashes, storage state, access class, and target-attempt provenance |
@@ -38,9 +40,11 @@ For schema `1.3.0` and later, target, raw-evidence, field, and attempt links are
 
 For schema `1.4.0` and later, executor selection is also explicit. `run_manifest.json.coordination` records whether independent lanes were assessed, the child-agent delegation decision, its exception reason when applicable, and every considered external executor. A selected external executor resolves to both a real pilot attempt and an `external_cli` task; a declared child-agent delegation resolves to at least one `child_agent` task.
 
+For schema `1.5.0` and later, discovery completeness and runtime allocation are explicit. `run_manifest.json.collection_control` records whether the discovery boundary was assessed, whether the universe is a bounded plan or frontier ledger, the selector policy, exploration allowance, and retry and task-escalation caps. Discovery events and batch decisions are append-only; they explain enumeration and allocation without replacing immutable targets or mutable task leases.
+
 ## Target and raw-artifact grain
 
-A target is an immutable retrieval or discovery unit, not its latest execution status. `target_queue.jsonl` records its canonical locator, route, page and source class, semantic dimensions, planned fields, priority, shard, partition, and planner version. Attempts and tasks carry changing execution state.
+A target is an immutable retrieval or discovery unit, not its latest execution status. `target_queue.jsonl` records its canonical locator, initial and candidate routes, discovery-frontier lineage, page and source class, semantic dimensions, planned fields, priority, shard, partition, and planner version. Attempts, decisions, and tasks carry changing execution state. For schema `1.5.0` and later, route choice is excluded from target identity so a route switch preserves the same `target_id`; page type, source class, locator, target type, and declared semantic identity dimensions remain part of identity.
 
 Use a content-addressed raw store when retention is authorized. One raw-artifact row represents one target-attempt provenance link; multiple rows may reference the same stored hash. A stored row includes a relative path and byte count. An external or deliberately unretained artifact records its storage state and retention reason instead of pretending the payload was preserved.
 
@@ -98,6 +102,8 @@ Use one `tasks.jsonl` row per owned work lane. For schema `1.4.0` and later, eve
 
 The partition lease prevents duplicate ownership of data; resource leases prevent two active tasks from racing on the same session, profile, port, credential context, output artifact, or other exclusive runtime. An empty resource list is valid when the lane has no exclusive runtime dependency. Thread count and request concurrency remain attempt telemetry, not runner classes.
 
+For schema `1.5.0` and later, every task also records `prompt_version`, `acceptance_result`, `failure_class`, `escalated_from_task_id`, `escalation_step`, and `max_escalations`. Non-agent tasks may use a null prompt version; child agents may not. A task may escalate only from a partial or failed parent on the same goal snapshot and partition, and must change the prompt, model tier, reasoning tier, or executor. This makes exception upgrades measurable and prevents unchanged retries from being described as escalation.
+
 ## Deterministic materialization
 
 The merger must produce the same current view regardless of input file order or batch order.
@@ -131,5 +137,9 @@ Do not silently carry forward an older dynamic value when the current run has no
 - telemetry honesty: missing cost or usage stays unknown and is never converted to zero
 - dispatch visibility: selected child agents and external executors resolve to real tasks and pilots; non-selection has an explicit reason
 - resource-lease exclusivity: active tasks cannot share a partition or exclusive runtime lease key
+- discovery-frontier traceability: required source families resolve to stable frontier IDs with append-only terminal or blocker evidence
+- target-route independence: route changes do not create a new target identity
+- batch-decision reproducibility: the same ledger snapshots and policy produce the same target and route selection
+- escalation traceability: every upgraded task resolves to a failed or partial parent and changes a declared capability variable without exceeding the run cap
 
 Use `../scripts/merge_observations.py`, `../scripts/summarize_collection_run.py`, and `../scripts/validate_research_run.py` for the base implementation. Extend the schema only when a recurring field requires it; version the schema and add a regression case.

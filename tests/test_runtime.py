@@ -95,6 +95,8 @@ def target(
         "page_type": "synthetic-page",
         "source_class": "official",
         "route_id": "synthetic-route",
+        "route_candidates": ["synthetic-route"],
+        "frontier_ids": [],
         "locator": f"https://example.test/item/{target_id}",
         "original_locator": f"https://example.test/item/{target_id}",
         "dimensions": {"object_id": target_id, "market": "test"},
@@ -104,7 +106,7 @@ def target(
         "partition_key": "synthetic-template:shard-000",
         "batch_id": "batch-synthetic-template-shard-000",
         "planned_at": planned_at,
-        "planner_version": "1.0.0",
+        "planner_version": "1.1.0",
     }
 
 
@@ -122,6 +124,8 @@ class SkillStructureTests(unittest.TestCase):
             ROOT / "references" / "parallel-research-protocol.md",
             ROOT / "references" / "skill-integrations.md",
             ROOT / "references" / "output-contract.md",
+            ROOT / "scripts" / "record_discovery_frontier.py",
+            ROOT / "scripts" / "select_next_batch.py",
         ]
         for path in required:
             self.assertTrue(path.is_file(), path)
@@ -187,11 +191,31 @@ class RuntimeTests(unittest.TestCase):
         write_json(manifest_path, manifest)
         return manifest
 
+    def set_collection_control(
+        self,
+        run_dir: Path,
+        discovery_mode: str = "bounded_plan",
+        discovery_reason: str = "The declared matrix has deterministic axes and exclusions",
+    ) -> dict[str, object]:
+        manifest_path = run_dir / "run_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["collection_control"] = {
+            "discovery_assessed": True,
+            "discovery_mode": discovery_mode,
+            "discovery_reason": discovery_reason,
+            "selector_policy": "coverage_first_yield_adaptive",
+            "max_attempts_per_target_route": 2,
+            "max_task_escalations": 2,
+            "exploration_slots": 1,
+        }
+        write_json(manifest_path, manifest)
+        return manifest
+
     def complete_contract_files(self, run_dir: Path) -> None:
         write_json(
             run_dir / "data_dictionary.json",
             {
-                "schema_version": "1.4.0",
+                "schema_version": "1.5.0",
                 "goal_id": "goal-test",
                 "unit_of_analysis": "object x field x market x period",
                 "key_fields": ["object_type", "object_id", "field", "market", "period"],
@@ -201,25 +225,30 @@ class RuntimeTests(unittest.TestCase):
         write_json(
             run_dir / "coverage_plan.json",
             {
-                "schema_version": "1.4.0",
+                "schema_version": "1.5.0",
                 "goal_id": "goal-test",
                 "dimensions": ["object", "field", "market", "source_class"],
                 "required_source_classes": ["official", "independent"],
                 "required_cells": ["CELL-001"],
+                "required_frontier_ids": [],
                 "required_fields": [],
                 "completion_rule": "Every required cell has a terminal state",
+                "discovery_completion_rule": "The bounded plan has deterministic axes and exclusions",
             },
         )
         self.set_coordination(run_dir)
+        self.set_collection_control(run_dir)
 
     def test_initialization_and_goal_drift_detection(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             run_dir, initialized = self.initialize(Path(temp))
-            self.assertEqual("1.4.0", initialized["schema_version"])
+            self.assertEqual("1.5.0", initialized["schema_version"])
             self.assertEqual("standard", initialized["depth"])
             self.assertTrue((run_dir / "data_dictionary.json").is_file())
             self.assertTrue((run_dir / "coverage_plan.json").is_file())
             self.assertTrue((run_dir / "collection_attempts.jsonl").is_file())
+            self.assertTrue((run_dir / "discovery_frontier.jsonl").is_file())
+            self.assertTrue((run_dir / "batch_decisions.jsonl").is_file())
 
             self.complete_contract_files(run_dir)
             valid = run_script("validate_research_run.py", run_dir, "--strict")
@@ -262,7 +291,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "data_dictionary.json",
                 {
-                    "schema_version": "1.4.0",
+                    "schema_version": "1.5.0",
                     "goal_id": "goal-fields",
                     "unit_of_analysis": "listing x field x market x observation time",
                     "key_fields": ["listing_id", "field", "market", "observed_at"],
@@ -272,13 +301,15 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "coverage_plan.json",
                 {
-                    "schema_version": "1.4.0",
+                    "schema_version": "1.5.0",
                     "goal_id": "goal-fields",
                     "dimensions": ["listing", "field", "market"],
                     "required_source_classes": ["official"],
                     "required_cells": ["CELL-PRICE"],
+                    "required_frontier_ids": [],
                     "required_fields": ["price"],
                     "completion_rule": "Every required target-field cell has a terminal state",
+                    "discovery_completion_rule": "The bounded plan has deterministic axes and exclusions",
                 },
             )
 
@@ -293,6 +324,7 @@ class RuntimeTests(unittest.TestCase):
             contract["acceptance_fields"] = ["price"]
             write_json(contract_path, contract)
             self.set_coordination(run_dir)
+            self.set_collection_control(run_dir)
             valid = run_script("validate_research_run.py", run_dir, "--strict")
             self.assertEqual(0, json.loads(valid.stdout)["errors"])
 
@@ -448,6 +480,12 @@ class RuntimeTests(unittest.TestCase):
                         "allowed_side_effects": [],
                         "resource_lease_keys": [],
                         "readiness_state": "ready",
+                        "prompt_version": None,
+                        "acceptance_result": "passed",
+                        "failure_class": None,
+                        "escalated_from_task_id": None,
+                        "escalation_step": 0,
+                        "max_escalations": 2,
                     }
                 ],
             )
@@ -526,6 +564,12 @@ class RuntimeTests(unittest.TestCase):
                     "escalation_condition": "unresolved identity or route failure",
                     "allowed_side_effects": [],
                     "resource_lease_keys": [resource_key],
+                    "prompt_version": "agent-contract-v1" if runner_class == "child_agent" else None,
+                    "acceptance_result": "unassessed",
+                    "failure_class": None,
+                    "escalated_from_task_id": None,
+                    "escalation_step": 0,
+                    "max_escalations": 2,
                 }
                 if runner_class == "child_agent":
                     row["model_tier"] = "balanced"
@@ -548,6 +592,26 @@ class RuntimeTests(unittest.TestCase):
             write_jsonl(run_dir / "tasks.jsonl", [lead_only[0], child])
             valid = run_script("validate_research_run.py", run_dir, "--strict")
             self.assertEqual(2, json.loads(valid.stdout)["tasks"])
+
+            parent = task("TASK-AGENT-BASE", "child_agent", "worker-balanced", "partition:exception", "output:base")
+            parent["status"] = "failed"
+            parent["acceptance_result"] = "failed"
+            parent["failure_class"] = "reasoning_depth"
+            escalated = task("TASK-AGENT-HIGH", "child_agent", "worker-balanced", "partition:exception", "output:escalated")
+            escalated["reasoning_tier"] = "high"
+            escalated["prompt_version"] = "agent-contract-v2"
+            escalated["escalated_from_task_id"] = parent["task_id"]
+            escalated["escalation_step"] = 1
+            write_jsonl(run_dir / "tasks.jsonl", [parent, escalated])
+            valid_escalation = run_script("validate_research_run.py", run_dir, "--strict")
+            self.assertEqual(2, json.loads(valid_escalation.stdout)["tasks"])
+
+            escalated["reasoning_tier"] = parent["reasoning_tier"]
+            escalated["prompt_version"] = parent["prompt_version"]
+            write_jsonl(run_dir / "tasks.jsonl", [parent, escalated])
+            unchanged_escalation = run_script("validate_research_run.py", run_dir, check=False)
+            self.assertNotEqual(0, unchanged_escalation.returncode)
+            self.assertIn("escalation did not change", unchanged_escalation.stdout)
 
     def test_planner_raw_cache_and_pilot_gate_form_a_closed_loop(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -581,7 +645,7 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "data_dictionary.json",
                 {
-                    "schema_version": "1.4.0",
+                    "schema_version": "1.5.0",
                     "goal_id": "goal-plan",
                     "unit_of_analysis": "listing x field x market x observation time",
                     "key_fields": ["listing_id", "field", "market", "observed_at"],
@@ -591,13 +655,15 @@ class RuntimeTests(unittest.TestCase):
             write_json(
                 run_dir / "coverage_plan.json",
                 {
-                    "schema_version": "1.4.0",
+                    "schema_version": "1.5.0",
                     "goal_id": "goal-plan",
                     "dimensions": ["target", "field", "market"],
                     "required_source_classes": ["official"],
                     "required_cells": [],
+                    "required_frontier_ids": [],
                     "required_fields": ["price"],
                     "completion_rule": "Every planned target-field cell has a terminal state",
+                    "discovery_completion_rule": "The bounded plan has deterministic axes and exclusions",
                 },
             )
             field_contract_path = run_dir / "field_contract.json"
@@ -606,6 +672,7 @@ class RuntimeTests(unittest.TestCase):
             field_contract["acceptance_fields"] = ["price"]
             write_json(field_contract_path, field_contract)
             self.set_coordination(run_dir)
+            self.set_collection_control(run_dir)
             spec_path = root / "plan.json"
             write_json(
                 spec_path,
@@ -767,6 +834,216 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(1.0, pilot_summary["target_field_terminalization_rate"])
             validated = run_script("validate_research_run.py", run_dir, "--strict", "--verify-raw-files")
             self.assertEqual(0, json.loads(validated.stdout)["errors"])
+
+    def test_discovery_frontier_and_selector_close_the_runtime_feedback_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            run_dir = root / "run"
+            run_script(
+                "init_research_run.py",
+                "--output",
+                run_dir,
+                "--goal",
+                "Close required coverage efficiently",
+                "--decision-use",
+                "Verify adaptive batch selection",
+                "--mode",
+                "coverage-sweep",
+                "--depth",
+                "exhaustive",
+                "--goal-id",
+                "goal-adaptive",
+                "--run-id",
+                "run-adaptive",
+                "--required-field",
+                "price",
+                "--stop",
+                "Every required frontier and target-field cell is terminal",
+            )
+            write_json(
+                run_dir / "data_dictionary.json",
+                {
+                    "schema_version": "1.5.0",
+                    "goal_id": "goal-adaptive",
+                    "unit_of_analysis": "listing x field x market",
+                    "key_fields": ["listing_id", "field", "market"],
+                    "fields": {"price": {}},
+                },
+            )
+            field_contract_path = run_dir / "field_contract.json"
+            field_contract = json.loads(field_contract_path.read_text(encoding="utf-8"))
+            field_contract["extractor_output_fields"] = ["price"]
+            field_contract["acceptance_fields"] = ["price"]
+            write_json(field_contract_path, field_contract)
+            self.set_coordination(run_dir)
+            self.set_collection_control(
+                run_dir,
+                discovery_mode="frontier_ledger",
+                discovery_reason="The source exposes a cursor-bounded enumeration frontier",
+            )
+
+            active = run_script(
+                "record_discovery_frontier.py",
+                run_dir,
+                "--source-class",
+                "official",
+                "--method",
+                "cursor",
+                "--entrypoint",
+                "https://example.test/api/items",
+                "--state",
+                "active",
+                "--cursor",
+                "page-1",
+                "--event-at",
+                "2026-09-01T00:00:00Z",
+                "--new-target-count",
+                "2",
+            )
+            frontier_id = json.loads(active.stdout)["frontier_id"]
+            exhausted_args = (
+                run_dir,
+                "--frontier-id",
+                frontier_id,
+                "--source-class",
+                "official",
+                "--method",
+                "cursor",
+                "--entrypoint",
+                "https://example.test/api/items",
+                "--state",
+                "exhausted",
+                "--cursor",
+                "end",
+                "--event-at",
+                "2026-09-01T00:01:00Z",
+                "--end-reason",
+                "The endpoint returned no next cursor",
+            )
+            exhausted = run_script("record_discovery_frontier.py", *exhausted_args)
+            self.assertTrue(json.loads(exhausted.stdout)["registry_appended"])
+            exhausted_again = run_script("record_discovery_frontier.py", *exhausted_args)
+            self.assertFalse(json.loads(exhausted_again.stdout)["registry_appended"])
+
+            coverage_plan_path = run_dir / "coverage_plan.json"
+            coverage_plan = json.loads(coverage_plan_path.read_text(encoding="utf-8"))
+            coverage_plan.update(
+                {
+                    "dimensions": ["target", "field", "market", "source_class"],
+                    "required_source_classes": ["official"],
+                    "required_frontier_ids": [frontier_id],
+                    "completion_rule": "Every required target-field cell is terminal",
+                    "discovery_completion_rule": "Every required frontier is exhausted or explicitly blocked",
+                }
+            )
+            write_json(coverage_plan_path, coverage_plan)
+
+            spec_path = root / "adaptive-plan.json"
+            write_json(
+                spec_path,
+                {
+                    "planned_at": "2026-09-01T00:02:00Z",
+                    "shard_count": 2,
+                    "axes": {"object_id": ["object-a", "object-b"], "market": ["test"]},
+                    "templates": [
+                        {
+                            "template_id": "item-page",
+                            "vary_by": ["object_id", "market"],
+                            "identity_axes": ["object_id", "market"],
+                            "target_type": "listing",
+                            "page_type": "detail",
+                            "source_class": "official",
+                            "route_id": "lightweight-fetch",
+                            "route_candidates": ["lightweight-fetch", "rendered-fetch"],
+                            "frontier_ids": [frontier_id],
+                            "locator_template": "https://example.test/{market}/item/{object_id}",
+                            "coverage_fields": ["price"],
+                            "priority": 100,
+                        }
+                    ],
+                },
+            )
+            run_script("plan_collection.py", run_dir, "--spec", spec_path)
+            planned_targets = [
+                json.loads(line)
+                for line in (run_dir / "target_queue.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            write_jsonl(
+                run_dir / "collection_attempts.jsonl",
+                [
+                    {
+                        "attempt_id": "A-LIGHT-FAIL",
+                        "run_id": "run-adaptive",
+                        "batch_id": planned_targets[0]["batch_id"],
+                        "target_id": planned_targets[0]["target_id"],
+                        "stage": "fetch",
+                        "adapter": "lightweight-fetch",
+                        "route_id": "lightweight-fetch",
+                        "route_version": "1",
+                        "attempt_no": 1,
+                        "status": "timeout",
+                        "started_at": "2026-09-01T00:02:10Z",
+                        "finished_at": "2026-09-01T00:02:20Z",
+                        "elapsed_ms": 10000,
+                        "new_record_count": 0,
+                        "valid_record_count": 0,
+                        "error_category": "transient_timeout",
+                        "next_route_id": "rendered-fetch",
+                    },
+                    {
+                        "attempt_id": "A-RENDER-PASS",
+                        "run_id": "run-adaptive",
+                        "batch_id": planned_targets[1]["batch_id"],
+                        "target_id": planned_targets[1]["target_id"],
+                        "stage": "extract",
+                        "adapter": "rendered-fetch",
+                        "route_id": "rendered-fetch",
+                        "route_version": "1",
+                        "attempt_no": 1,
+                        "status": "success",
+                        "started_at": "2026-09-01T00:02:21Z",
+                        "finished_at": "2026-09-01T00:02:31Z",
+                        "elapsed_ms": 10000,
+                        "new_record_count": 2,
+                        "valid_record_count": 2,
+                    },
+                ],
+            )
+
+            first = run_script(
+                "select_next_batch.py",
+                run_dir,
+                "--limit",
+                "1",
+                "--decided-at",
+                "2026-09-01T00:03:00Z",
+            )
+            first_decision = json.loads(first.stdout)
+            self.assertEqual("continue", first_decision["stop_decision"])
+            self.assertEqual(1, first_decision["selected_count"])
+            self.assertEqual("rendered-fetch", first_decision["selected"][0]["selected_route_id"])
+            self.assertTrue(first_decision["discovery_complete"])
+
+            second = run_script(
+                "select_next_batch.py",
+                run_dir,
+                "--limit",
+                "1",
+                "--decided-at",
+                "2026-09-01T00:04:00Z",
+            )
+            second_decision = json.loads(second.stdout)
+            self.assertEqual(first_decision["decision_id"], second_decision["decision_id"])
+            self.assertFalse(second_decision["ledger_appended"])
+            self.assertEqual(1, len((run_dir / "batch_decisions.jsonl").read_text(encoding="utf-8").splitlines()))
+
+            validated = run_script("validate_research_run.py", run_dir, "--strict")
+            validation_summary = json.loads(validated.stdout)
+            self.assertEqual(2, validation_summary["frontier_events"])
+            self.assertEqual(1, validation_summary["batch_decisions"])
+            summarized = json.loads(run_script("summarize_collection_run.py", run_dir).stdout)
+            self.assertEqual(2, summarized["control_loop"]["frontier_events"])
+            self.assertEqual("continue", summarized["control_loop"]["latest_stop_decision"])
 
 
 if __name__ == "__main__":

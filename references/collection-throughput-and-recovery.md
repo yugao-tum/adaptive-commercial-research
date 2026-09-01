@@ -11,6 +11,14 @@ Use a two-pass pipeline:
 
 Do not send every discovered URL directly to the most expensive route. Canonicalize URLs, strip tracking parameters, resolve known aliases, and deduplicate stable platform or listing IDs first. Use content hashes after retrieval to suppress mirrors and repeated templates while retaining provenance.
 
+## Audit the discovery frontier
+
+Field coverage cannot prove that the candidate universe was fully enumerated. For every bounded discovery entrypoint, append frontier events with `record_discovery_frontier.py`: source class, enumeration method, entrypoint, stable dimensions, query or alias context, cursor or page checkpoint, new, duplicate, and invalid target counts, and the terminal reason or blocker.
+
+Use `bounded_plan` discovery mode only when deterministic axes and exclusions define the candidate universe. Use `frontier_ledger` when pagination, cursors, sitemaps, feeds, categories, search variants, registries, or exports must be traversed. A frontier is complete only when it is `exhausted` or explicitly `blocked`; an empty page, timeout, or login wall is not exhaustion unless the route's documented boundary proves it.
+
+For an open-ended universe, report relative completeness against the declared frontiers. Treat rising overlap and repeated low new-target yield as a saturation signal, not proof that the wider internet contains no additional targets. Keep required frontier IDs and required source classes explicit so an efficient high-yield route cannot hide an untouched low-yield family.
+
 ## Extract once, decide per field
 
 Before a costly route is scaled, map which required and optional fields the same response, rendered region, export row, or authorized session can expose. If one successful retrieval contains several in-scope fields, parse them in the same pass when doing so is reliable and materially cheaper than revisiting the target.
@@ -57,6 +65,21 @@ Persist each completed page, cursor, or bounded batch before requesting the next
 
 Register an authorized raw response with `../scripts/register_raw_artifact.py` before field parsing when retaining it is permitted. The registry keeps target, attempt, route, hash, storage, access, and retrieval context separate from observations. Identical bytes share content-addressed storage while each retrieval retains its own provenance row.
 
+## Close the batch-selection loop
+
+After each pilot or bounded batch, run `select_next_batch.py` instead of manually appending the highest-volume route. The selector reads immutable targets plus append-only coverage, attempt, task-lease, and discovery-frontier ledgers. It:
+
+1. removes targets whose required cells are already terminal, whose partition is actively leased, or whose target-route retry cap is exhausted;
+2. preserves route changes recorded by the failed attempt without changing the target identity;
+3. ranks unresolved required-field debt before optional enrichment;
+4. reserves bounded exploration for routes without current-run evidence;
+5. gives unresolved source classes a fair slot before filling remaining capacity by smoothed success, unique-record yield, latency, and known cost; and
+6. appends the selected targets, route choice, input-ledger hashes, exclusions, and stop decision to `batch_decisions.jsonl`.
+
+The decision ledger is evidence for why work ran; it is not a second mutable queue. The lead or deterministic dispatcher creates tasks and leases from the selected package. Re-running the selector against unchanged ledgers is idempotent. Re-run it after new attempts, coverage states, frontier events, task leases, or a deliberate policy change.
+
+Do not optimize a single blended score without completeness constraints. Required-field debt and source-family representation are eligibility and fairness gates; observed route utility chooses among eligible work. This prevents both failure modes: chasing cheap duplicate records while coverage stalls, and spending the whole budget on low-probability completeness work before validating productive routes.
+
 ## Failure taxonomy and route changes
 
 Classify failure before retrying. An identical retry without a changed condition is usually waste.
@@ -73,6 +96,8 @@ Classify failure before retrying. An identical retry without a changed condition
 | geography or locale mismatch | record the boundary | permitted locale route or explicit coverage gap |
 
 Cap retries by failure class. Route switches must preserve the same `target_id`, link to the prior attempt, and record what changed. Put terminal failures in a dead-letter or blocked queue with their exact reason so one source cannot monopolize workers.
+
+Treat repeated target-route failures as a circuit-breaker input. Once the configured cap is reached, the selector removes that target-route pair from runnable work. A hard access, challenge, or invalid-target failure requires an explicit `next_route_id` before another route becomes eligible. A parser failure should consume preserved raw evidence before any network retry. Do not raise global concurrency to compensate for a blocked queue.
 
 Keep adapter or wrapper status separate from content classification. If an outer tool reports an error while preserving parseable target evidence, retain both facts and apply an explicit, versioned precedence rule. Repair classification in deterministic parser code with a regression case; append the corrected attempt or observation rather than deleting the earlier record.
 
@@ -106,6 +131,8 @@ Report at least:
 - route and executor efficiency under the same acceptance rule
 
 Raw request count, total downloaded pages, terminal target count, and successful HTTP status alone do not demonstrate useful collection. Use `../scripts/summarize_collection_run.py` to derive comparable field, batch, route, executor, cost, and recovery metrics from the append-only ledgers. Summed attempt time is not wall-clock time when work ran concurrently.
+
+For schema `1.5.0` and later, the summary also reports discovery-frontier state and the latest batch-control decision. Interpret these together: high accepted yield with open required frontiers is efficient but incomplete; terminal frontiers with low required-field completion means enumeration succeeded but extraction did not.
 
 ## Stop and switch rules
 
